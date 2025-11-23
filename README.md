@@ -37,14 +37,14 @@ EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer
 ```bash
 Development Installation
 bash
-git clone https://github.com/lyyunyun/EasyCen.git
+git clone https://github.com/lvyunyunSCI/EasyCen.git
 cd EasyCen
 pip install -e .
 ```
 ### Dependencies
 EasyCen automatically installs the following dependencies:
 
-Core: numpy, scipy, matplotlib, biopython, pandas, seaborn
+Core: numpy, scipy, matplotlib, biopython, pandas, seaborn, samtools, pigz
 
 Performance: numba (optional, for acceleration), tqdm
 
@@ -284,6 +284,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
