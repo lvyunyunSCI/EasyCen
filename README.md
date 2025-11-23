@@ -65,10 +65,10 @@ easycen analyze --fasta genome.fa -k 21 --window 50000 --output custom_results
 ```bash
 # Visualize analysis results
 easycen visualize --results-dir results
-```
 
 # With known centromere annotations for boundary optimization
 easycen visualize --results-dir results --known-centromeres centromeres.bed
+```
 ### Hi-C Contact Maps
 ```bash
 # Plot triangular Hi-C maps
@@ -284,6 +284,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
