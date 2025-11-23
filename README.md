@@ -69,7 +69,7 @@ easycen visualize --results-dir results
 # With known centromere annotations for boundary optimization
 easycen visualize --results-dir results --known-centromeres centromeres.bed
 ```
-### Hi-C Contact Maps
+### Repeat kmers transform pairs and visualized as Hi-C Contact Maps
 ```bash
 easycen kmer-pairs --kmer-library ./results/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
 samtools faidx ${abb}.cen.fa
@@ -289,6 +289,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
