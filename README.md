@@ -52,21 +52,23 @@ Utilities: multiprocess, psutil
 
 ### Quick Start
 ### Basic Centromere Analysis
-bash
+```bash
 # Analyze centromeres with default parameters
 easycen analyze --fasta genome.fa --output results
+```
 
 # With custom k-mer length and window size
 easycen analyze --fasta genome.fa -k 21 --window 50000 --output custom_results
 ### Visualization
-bash
+```bash
 # Visualize analysis results
 easycen visualize --results-dir results
+```
 
 # With known centromere annotations for boundary optimization
 easycen visualize --results-dir results --known-centromeres centromeres.bed
 ### Hi-C Contact Maps
-bash
+```bash
 # Plot triangular Hi-C maps
 easycen hic --mcool hic_data.mcool --resolution 10000 --regions "chr1:0-1000000" --outdir hic_plots
 
@@ -86,9 +88,10 @@ Key Parameters
 --output: Output directory (default: "easycen_results")
 
 --processes: Number of parallel processes (default: CPU count - 1)
+```
 
 Advanced Options
-bash
+```bash
 # Comprehensive analysis with filtering
 easycen analyze --fasta genome.fa \
     -k 19 \
@@ -110,6 +113,7 @@ kmer_table.tsv: Filtered k-mer statistics
 *_feature_percent.bedgraph: Feature percentage tracks
 
 centromere_summary.txt: Detailed centromere analysis report
+```
 
 ### 2. Visualization (visualize)
 The visualization module creates publication-quality plots and performs boundary optimization.
@@ -126,7 +130,7 @@ Key Parameters
 --feature-weight: Weight for feature percentage in optimization (default: 0.4)
 
 Examples
-bash
+```bash
 # Basic visualization
 easycen visualize --results-dir analysis_results
 
@@ -150,6 +154,7 @@ centromere_statistics.pdf: Statistical summary
 centromere_statistics.csv: Statistical data
 
 optimized_centromeres_*.bed: Optimized boundary coordinates
+```
 
 ### 3. Hi-C Plotting (hic)
 Visualize triangular Hi-C contact maps from .mcool files.
@@ -166,7 +171,7 @@ Key Parameters
 --single: Generate separate plots for each region
 
 Examples
-bash
+```bash
 # Single region plot
 easycen hic --mcool hic.mcool --resolution 10000 \
     --regions "chr1:1000000-5000000" --outdir hic_out
@@ -182,6 +187,7 @@ easycen hic --mcool hic.mcool --resolution 10000 \
     --fig_width 8 --fig_height 6
 4. K-mer Pairs (kmer-pairs)
 Generate random k-mer position pairs for spatial analysis.
+```
 
 Key Parameters
 --kmer-library: K-mer library file (required)
@@ -195,12 +201,13 @@ Key Parameters
 --threads: Number of worker threads (default: 4)
 
 Example
-bash
+```bash
 easycen kmer-pairs --kmer-library kmers.txt \
     --fasta genome.fa \
     --sample 20 \
     --max-pairs-per-kmer 5000 \
     --output kmer_pairs.tsv.gz
+```
 5. Sequence Extraction (extract)
 Extract genomic sequences from BED file regions.
 
@@ -216,7 +223,7 @@ Key Parameters
 -c/--case: Output case: original, upper, or lower
 
 Examples
-bash
+```bash
 # Basic extraction
 easycen extract -i genome.fa -b regions.bed -o sequences.fa
 
@@ -245,14 +252,16 @@ for genome in genomes/*.fa; do
     base=$(basename $genome .fa)
     easycen analyze --fasta $genome --output results_$base
 done
+```
 Integration with Other Tools
-bash
+```bash
 # Extract centromere sequences for further analysis
 easycen extract -i genome.fa -b results/analysis_centromeres.bed -o centromere_sequences.fa
 
 # Generate k-mer pairs for spatial analysis
 easycen kmer-pairs --kmer-library significant_kmers.txt \
     --fasta genome.fa --output spatial_pairs.tsv.gz
+```
 Output Interpretation
 Centromere Summary
 The centromere summary provides:
@@ -273,6 +282,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
