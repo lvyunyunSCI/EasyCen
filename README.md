@@ -38,6 +38,7 @@ bash
 git clone https://github.com/lyyunyun/EasyCen.git
 cd EasyCen
 pip install -e .
+```
 ### Dependencies
 EasyCen automatically installs the following dependencies:
 
@@ -272,5 +273,6 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
