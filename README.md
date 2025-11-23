@@ -25,8 +25,8 @@ EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer
 
 - Python 3.12
 ### conda env 
-conda ceate -n EasyCen_env install python=3.12 pigz 
-pip install -e .
+- conda ceate -n EasyCen_env install python=3.12 pigz 
+- pip install -e .
 - 4GB+ RAM (8GB+ recommended for large genomes)
 - Multi-core processor for parallel processing
 
@@ -272,3 +272,4 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
