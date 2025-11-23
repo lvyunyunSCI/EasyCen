@@ -38,7 +38,7 @@ bash
 git clone https://github.com/lyyunyun/EasyCen.git
 cd EasyCen
 pip install -e .
-Dependencies
+### Dependencies
 EasyCen automatically installs the following dependencies:
 
 Core: numpy, scipy, matplotlib, biopython, pandas, seaborn
@@ -49,30 +49,30 @@ Visualization: trackc, cooler
 
 Utilities: multiprocess, psutil
 
-Quick Start
-Basic Centromere Analysis
+### Quick Start
+### Basic Centromere Analysis
 bash
 # Analyze centromeres with default parameters
 easycen analyze --fasta genome.fa --output results
 
 # With custom k-mer length and window size
 easycen analyze --fasta genome.fa -k 21 --window 50000 --output custom_results
-Visualization
+### Visualization
 bash
 # Visualize analysis results
 easycen visualize --results-dir results
 
 # With known centromere annotations for boundary optimization
 easycen visualize --results-dir results --known-centromeres centromeres.bed
-Hi-C Contact Maps
+### Hi-C Contact Maps
 bash
 # Plot triangular Hi-C maps
 easycen hic --mcool hic_data.mcool --resolution 10000 --regions "chr1:0-1000000" --outdir hic_plots
 
 # From BED file with multiple regions
 easycen hic --mcool hic_data.mcool --resolution 10000 --regions regions.bed --outdir hic_plots
-Module Documentation
-1. Core Analysis (analyze)
+### Module Documentation
+### 1. Core Analysis (analyze)
 The core analysis module performs genome-wide k-mer profiling and centromere detection.
 
 Key Parameters
@@ -110,7 +110,7 @@ kmer_table.tsv: Filtered k-mer statistics
 
 centromere_summary.txt: Detailed centromere analysis report
 
-2. Visualization (visualize)
+### 2. Visualization (visualize)
 The visualization module creates publication-quality plots and performs boundary optimization.
 
 Key Parameters
@@ -150,7 +150,7 @@ centromere_statistics.csv: Statistical data
 
 optimized_centromeres_*.bed: Optimized boundary coordinates
 
-3. Hi-C Plotting (hic)
+### 3. Hi-C Plotting (hic)
 Visualize triangular Hi-C contact maps from .mcool files.
 
 Key Parameters
@@ -272,4 +272,5 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
