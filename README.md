@@ -71,6 +71,11 @@ easycen visualize --results-dir results --known-centromeres centromeres.bed
 ```
 ### Hi-C Contact Maps
 ```bash
+easycen kmer-pairs --kmer-library ./results/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
 # Plot triangular Hi-C maps
 easycen hic --mcool hic_data.mcool --resolution 10000 --regions "chr1:0-1000000" --outdir hic_plots
 
@@ -284,6 +289,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
