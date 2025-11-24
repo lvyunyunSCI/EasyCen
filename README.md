@@ -11,7 +11,7 @@
 EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer analysis with specialized focus on centromere detection and visualization. The toolkit integrates multiple analysis modules including k-mer profiling, centromere boundary optimization, Hi-C contact map visualization, and sequence extraction.
 
 ## workflow
-[![EasyCen workflow]([figure](https://github.com/lvyunyunSCI/EasyCen/tree/main/figure/Figure 1.png))]
+[![EasyCen workflow](https://github.com/lvyunyunSCI/EasyCen/tree/main/figure/Figure 1.png)
 
 ### Key Features
 
@@ -292,6 +292,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
