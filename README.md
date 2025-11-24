@@ -12,7 +12,6 @@ EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer
 
 ## workflow
 ![示例图片](https://github.com/lvyunyunSCI/EasyCen/tree/main/figure/Figure 1.png?raw=true)
-[![Version](https://github.com/lvyunyunSCI/EasyCen/tree/main/figure/Figure 1.png)]()
 
 ### Key Features
 
@@ -293,6 +292,7 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
 
 
 
