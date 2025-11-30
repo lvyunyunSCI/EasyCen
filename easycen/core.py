@@ -7,6 +7,10 @@ Author: Yunyun Lv
 Email: lvyunyun_sci@foxmail.com
 Version: 1.0.0
 License: MIT
+
+Note: Centromere detection now uses weighted combination of kmer density (30%) 
+and feature_percent (70%), where higher kmer density and lower feature_percent 
+indicate centromere regions. These weights can be adjusted in future versions.
 """
 
 import argparse
@@ -449,27 +453,34 @@ def detect_centromere_regions_optimized(outdir, min_region_size=500000, max_gap=
     
     centromere_results = {}
     kmer_files = glob.glob(f"{outdir}/*_kmer.bedgraph")
+    feature_files = glob.glob(f"{outdir}/*_feature_percent.bedgraph")
     
     for kmer_file in tqdm(kmer_files, desc="Analyzing chromosomes"):
         chrom_name = os.path.basename(kmer_file).replace('_kmer.bedgraph', '')
         
         kmer_data = load_bedgraph_data(kmer_file)
-        if not kmer_data:
+        feature_file = f"{outdir}/{chrom_name}_feature_percent.bedgraph"
+        feature_data = load_bedgraph_data(feature_file)
+        
+        if not kmer_data or not feature_data:
             continue
             
-        chrom_length = kmer_data[-1]['end'] if kmer_data else 0
+        # Combine kmer and feature data with weights
+        combined_data = combine_kmer_feature_data(kmer_data, feature_data)
+        
+        chrom_length = combined_data[-1]['end'] if combined_data else 0
         
         candidates = find_centromere_candidates_optimized(
-            kmer_data, chrom_length, min_region_size, max_gap, 
+            combined_data, chrom_length, min_region_size, max_gap, 
             kmer_density_threshold, centromere_type
         )
         
         ranked_candidates = score_centromere_candidates_optimized(
-            candidates, kmer_data, chrom_length, centromere_type
+            candidates, combined_data, chrom_length, centromere_type
         )
         
         expanded_candidates = expand_centromere_regions(
-            ranked_candidates, kmer_data, chrom_length
+            ranked_candidates, combined_data, chrom_length
         )
         
         centromere_results[chrom_name] = {
@@ -481,9 +492,38 @@ def detect_centromere_regions_optimized(outdir, min_region_size=500000, max_gap=
     
     return centromere_results
 
-def find_centromere_candidates_optimized(kmer_data, chrom_length, min_region_size, max_gap, 
+def combine_kmer_feature_data(kmer_data, feature_data):
+    """Combine kmer and feature data with weights: 0.3 for kmer, 0.7 for feature_percent (inverted)"""
+    combined_data = []
+    
+    for kmer_item, feature_item in zip(kmer_data, feature_data):
+        # Normalize kmer value (higher is better)
+        kmer_values = [item['value'] for item in kmer_data]
+        max_kmer = max(kmer_values) if kmer_values else 1
+        norm_kmer = kmer_item['value'] / max_kmer if max_kmer > 0 else 0
+        
+        # Normalize and invert feature_percent (lower is better)
+        feature_values = [item['value'] for item in feature_data]
+        max_feature = max(feature_values) if feature_values else 1
+        norm_feature = 1 - (feature_item['value'] / max_feature) if max_feature > 0 else 0
+        
+        # Combine with weights: 0.3 for kmer, 0.7 for feature_percent
+        combined_value = 0.3 * norm_kmer + 0.7 * norm_feature
+        
+        combined_data.append({
+            'chrom': kmer_item['chrom'],
+            'start': kmer_item['start'],
+            'end': kmer_item['end'],
+            'value': combined_value,
+            'kmer_value': kmer_item['value'],
+            'feature_value': feature_item['value']
+        })
+    
+    return combined_data
+
+def find_centromere_candidates_optimized(combined_data, chrom_length, min_region_size, max_gap, 
                                        kmer_density_threshold, centromere_type):
-    if not kmer_data:
+    if not combined_data:
         return []
     
     thresholds = [kmer_density_threshold * 0.8, kmer_density_threshold, kmer_density_threshold * 1.2]
@@ -491,13 +531,13 @@ def find_centromere_candidates_optimized(kmer_data, chrom_length, min_region_siz
     
     for threshold in thresholds:
         if centromere_type == "telocentric":
-            candidates = find_telocentric_centromeres_optimized(kmer_data, chrom_length, 
+            candidates = find_telocentric_centromeres_optimized(combined_data, chrom_length, 
                                                               min_region_size, max_gap, threshold)
         elif centromere_type == "metacentric":
-            candidates = find_metacentric_centromeres_optimized(kmer_data, chrom_length, 
+            candidates = find_metacentric_centromeres_optimized(combined_data, chrom_length, 
                                                               min_region_size, max_gap, threshold)
         else:
-            candidates = find_centromeres_auto_optimized(kmer_data, chrom_length, 
+            candidates = find_centromeres_auto_optimized(combined_data, chrom_length, 
                                                        min_region_size, max_gap, threshold)
         all_candidates.extend(candidates)
     
@@ -507,9 +547,9 @@ def find_centromere_candidates_optimized(kmer_data, chrom_length, min_region_siz
     
     return filtered_candidates
 
-def find_centromeres_auto_optimized(kmer_data, chrom_length, min_region_size, max_gap, kmer_density_threshold):
-    metacentric_candidates = find_metacentric_centromeres_optimized(kmer_data, chrom_length, min_region_size, max_gap, kmer_density_threshold)
-    telocentric_candidates = find_telocentric_centromeres_optimized(kmer_data, chrom_length, min_region_size, max_gap, kmer_density_threshold)
+def find_centromeres_auto_optimized(combined_data, chrom_length, min_region_size, max_gap, kmer_density_threshold):
+    metacentric_candidates = find_metacentric_centromeres_optimized(combined_data, chrom_length, min_region_size, max_gap, kmer_density_threshold)
+    telocentric_candidates = find_telocentric_centromeres_optimized(combined_data, chrom_length, min_region_size, max_gap, kmer_density_threshold)
     
     all_candidates = metacentric_candidates + telocentric_candidates
     unique_candidates = []
@@ -528,16 +568,16 @@ def find_centromeres_auto_optimized(kmer_data, chrom_length, min_region_size, ma
     
     return unique_candidates
 
-def find_metacentric_centromeres_optimized(kmer_data, chrom_length, min_region_size, max_gap, threshold):
-    if not kmer_data:
+def find_metacentric_centromeres_optimized(combined_data, chrom_length, min_region_size, max_gap, threshold):
+    if not combined_data:
         return []
     
-    kmer_values = [item['value'] for item in kmer_data]
-    if not kmer_values:
+    combined_values = [item['value'] for item in combined_data]
+    if not combined_values:
         return []
     
-    max_kmer = max(kmer_values)
-    kmer_threshold = max_kmer * threshold
+    max_combined = max(combined_values)
+    combined_threshold = max_combined * threshold
     
     chrom_center = chrom_length / 2
     central_region_size = chrom_length * 0.7
@@ -545,10 +585,10 @@ def find_metacentric_centromeres_optimized(kmer_data, chrom_length, min_region_s
     region_end = min(chrom_length, chrom_center + central_region_size/2)
     
     candidate_windows = []
-    for item in kmer_data:
+    for item in combined_data:
         window_center = (item['start'] + item['end']) / 2
         if (region_start <= window_center <= region_end and 
-            item['value'] >= kmer_threshold):
+            item['value'] >= combined_threshold):
             candidate_windows.append(item)
     
     if not candidate_windows:
@@ -556,26 +596,26 @@ def find_metacentric_centromeres_optimized(kmer_data, chrom_length, min_region_s
     
     return merge_candidate_regions_optimized(candidate_windows, max_gap * 1.5)
 
-def find_telocentric_centromeres_optimized(kmer_data, chrom_length, min_region_size, max_gap, threshold):
-    if not kmer_data:
+def find_telocentric_centromeres_optimized(combined_data, chrom_length, min_region_size, max_gap, threshold):
+    if not combined_data:
         return []
     
-    kmer_values = [item['value'] for item in kmer_data]
-    if not kmer_values:
+    combined_values = [item['value'] for item in combined_data]
+    if not combined_values:
         return []
     
-    max_kmer = max(kmer_values)
-    kmer_threshold = max_kmer * threshold
+    max_combined = max(combined_values)
+    combined_threshold = max_combined * threshold
     
     end_region_size = chrom_length * 0.35
     
     candidate_windows = []
-    for item in kmer_data:
+    for item in combined_data:
         window_center = (item['start'] + item['end']) / 2
         in_left_end = window_center <= end_region_size
         in_right_end = window_center >= (chrom_length - end_region_size)
         
-        if (in_left_end or in_right_end) and item['value'] >= kmer_threshold:
+        if (in_left_end or in_right_end) and item['value'] >= combined_threshold:
             candidate_windows.append(item)
     
     if not candidate_windows:
@@ -619,25 +659,25 @@ def merge_candidate_regions_optimized(candidate_windows, max_gap):
     
     return merged_regions
 
-def score_centromere_candidates_optimized(candidates, kmer_data, chrom_length, centromere_type="auto"):
+def score_centromere_candidates_optimized(candidates, combined_data, chrom_length, centromere_type="auto"):
     if not candidates:
         return []
     
     scored_candidates = []
     
     for candidate in candidates:
-        region_windows = [w for w in kmer_data 
+        region_windows = [w for w in combined_data 
                          if w['start'] >= candidate['start'] and w['end'] <= candidate['end']]
         
         if not region_windows:
             continue
         
-        kmer_values = [w['value'] for w in region_windows]
+        combined_values = [w['value'] for w in region_windows]
         
         region_length = candidate['end'] - candidate['start']
-        avg_kmer = np.mean(kmer_values)
-        max_kmer = max(kmer_values)
-        kmer_std = np.std(kmer_values)
+        avg_combined = np.mean(combined_values)
+        max_combined = max(combined_values)
+        combined_std = np.std(combined_values)
         
         region_center = (candidate['start'] + candidate['end']) / 2
         
@@ -651,21 +691,21 @@ def score_centromere_candidates_optimized(candidates, kmer_data, chrom_length, c
             position_score = 1.0
         
         position_score = max(0, position_score)
-        density_consistency = 1.0 - min(kmer_std / avg_kmer, 1.0) if avg_kmer > 0 else 0
+        density_consistency = 1.0 - min(combined_std / avg_combined, 1.0) if avg_combined > 0 else 0
         
         length_score = min(region_length / 1000000, 1.0)
-        kmer_score = avg_kmer / max([w['value'] for w in kmer_data]) if max([w['value'] for w in kmer_data]) > 0 else 0
+        combined_score = avg_combined / max([w['value'] for w in combined_data]) if max([w['value'] for w in combined_data]) > 0 else 0
         
-        combined_score = (0.4 * kmer_score + 
+        combined_score = (0.4 * combined_score + 
                          0.25 * length_score + 
                          0.2 * position_score +
                          0.15 * density_consistency)
         
         candidate.update({
             'length': region_length,
-            'avg_kmer_density': avg_kmer,
-            'max_kmer_density': max_kmer,
-            'kmer_std': kmer_std,
+            'avg_kmer_density': avg_combined,
+            'max_kmer_density': max_combined,
+            'kmer_std': combined_std,
             'region_center': region_center,
             'position_score': position_score,
             'density_consistency': density_consistency,
@@ -677,7 +717,7 @@ def score_centromere_candidates_optimized(candidates, kmer_data, chrom_length, c
     
     return sorted(scored_candidates, key=lambda x: x['score'], reverse=True)
 
-def expand_centromere_regions(candidates, kmer_data, chrom_length, expansion_factor=0.3):
+def expand_centromere_regions(candidates, combined_data, chrom_length, expansion_factor=0.3):
     if not candidates:
         return []
     
@@ -690,19 +730,19 @@ def expand_centromere_regions(candidates, kmer_data, chrom_length, expansion_fac
         new_start = max(0, candidate['start'] - expansion_size)
         new_end = min(chrom_length, candidate['end'] + expansion_size)
         
-        expanded_windows = [w for w in kmer_data 
+        expanded_windows = [w for w in combined_data 
                            if w['start'] >= new_start and w['end'] <= new_end]
         
         if expanded_windows:
-            expanded_kmer_values = [w['value'] for w in expanded_windows]
+            expanded_combined_values = [w['value'] for w in expanded_windows]
             
             expanded_candidate = candidate.copy()
             expanded_candidate.update({
                 'start': new_start,
                 'end': new_end,
                 'length': new_end - new_start,
-                'avg_kmer_density': np.mean(expanded_kmer_values),
-                'max_kmer_density': max(expanded_kmer_values),
+                'avg_kmer_density': np.mean(expanded_combined_values),
+                'max_kmer_density': max(expanded_combined_values),
                 'num_windows': len(expanded_windows)
             })
             

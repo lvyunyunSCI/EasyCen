@@ -21,7 +21,7 @@ def main():
     
     # analyze command
     analyze_parser = subparsers.add_parser("analyze", 
-        help="K-mer analysis and inital centromere detection",
+        help="K-mer analysis and initial centromere detection",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     analyze_parser.add_argument("--fasta", required=True, help="Input genome FASTA file")
     analyze_parser.add_argument("-k", "--kmer", type=int, default=17, help="k-mer length")
@@ -59,21 +59,64 @@ def main():
     
     # visualize command  
     vis_parser = subparsers.add_parser("visualize", 
-        help="Visualize centromere results and centromere detection optimization",
+        help="""Visualize centromere results and centromere detection optimization
+
+Recommended parameters for different genomes:
+- Mouse (large genome): --target-mean 0.5 --max-extension-factor 40 --optimization-extension 10000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+- Arabidopsis (small genome): --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+
+Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extension (e.g., 1Mb).
+      For large genomes (e.g., Mouse), use larger --optimization-extension (e.g., 10Mb).""",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    
     vis_parser.add_argument("--results-dir", required=True, help="Analysis results directory")
     vis_parser.add_argument("--known-centromeres", help="BED file with known centromeres")
     vis_parser.add_argument("--compare", help="BED file with published centromere regions for comparison")
-    vis_parser.add_argument("--kmer-weight", type=float, default=0.6, help="Weight for kmer density in optimization")
-    vis_parser.add_argument("--feature-weight", type=float, default=0.4, help="Weight for feature percentage in optimization")
-    vis_parser.add_argument("--optimization-extension", type=int, default=500000, help="Extension around known centromere for optimization search in bp")
+    vis_parser.add_argument("--kmer-weight", type=float, default=0.4, help="Weight for kmer density in optimization")
+    vis_parser.add_argument("--feature-weight", type=float, default=0.6, help="Weight for feature percentage in optimization")
+    vis_parser.add_argument("--optimization-extension", type=int, default=100000, 
+                          help="Initial extension around known centromere for optimization search in bp")
+    
+    # New optimization parameters
+    vis_parser.add_argument("--smoothing-sigma", type=float, default=2.0,
+                          help="Sigma parameter for Gaussian smoothing of composite scores")
+    vis_parser.add_argument("--distribution-threshold", type=float, default=0.05,
+                          help="Base threshold for boundary detection")
+    vis_parser.add_argument("--random-sampling-times", type=int, default=100000,
+                          help="Number of random samplings for distribution fitting")
+    vis_parser.add_argument("--sample-size", type=int, default=None,
+                          help="Sample size for each random sampling (default: min(30, data_size//10))")
+    vis_parser.add_argument("--peak-prominence", type=float, default=0.1,
+                          help="Minimum prominence for peak detection")
+    vis_parser.add_argument("--min-region-size", type=int, default=50000,
+                          help="Minimum size for candidate regions in bp")
+    
+    # Dynamic extension parameters
+    vis_parser.add_argument("--dynamic-extension", action="store_true", default=True,
+                          help="Enable dynamic extension to achieve target sampling mean")
+    vis_parser.add_argument("--no-dynamic-extension", action="store_false", dest="dynamic_extension",
+                          help="Disable dynamic extension")
+    vis_parser.add_argument("--target-mean", type=float, default=0.5,
+                          help="Target sampling mean for dynamic extension")
+    vis_parser.add_argument("--mean-tolerance", type=float, default=0.01,
+                          help="Tolerance for target mean in dynamic extension")
+    vis_parser.add_argument("--max-extension-factor", type=float, default=5.0,
+                          help="Maximum extension as multiple of initial extension")
+    vis_parser.add_argument("--extension-increment", type=int, default=50000,
+                          help="Increment for extension adjustment in bp")
+    
+    # Visualization control
     vis_parser.add_argument("--output-dir", help="Output directory for plots and BED files")
     vis_parser.add_argument("--no-genome-overview", action="store_false", dest="genome_overview", help="Skip genome overview plot")
     vis_parser.add_argument("--no-chromosome-details", action="store_false", dest="chromosome_details", help="Skip individual chromosome plots")
     vis_parser.add_argument("--no-statistics", action="store_false", dest="statistics", help="Skip statistical summary")
-    vis_parser.add_argument("--heatmap-colormap", default="viridis", choices=['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 'RdYlBu_r', 'Spectral_r'], help="Color map for heatmap tracks")
+    vis_parser.add_argument("--heatmap-colormap", default="viridis", 
+                          choices=['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 'RdYlBu_r', 'Spectral_r'], 
+                          help="Color map for heatmap tracks")
+    vis_parser.add_argument("--heatmap-height", type=float, default=0.3,
+                          help="Relative height of heatmap compared to line plot")
     
-    # hic command - 更新为新的参数
+    # hic command
     hic_parser = subparsers.add_parser("hic", 
         help="Plot triangular Kmer transformed matrix or Hi-C maps",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -166,7 +209,20 @@ def main():
                 genome_overview=args.genome_overview,
                 chromosome_details=args.chromosome_details,
                 statistics=args.statistics,
-                heatmap_colormap=args.heatmap_colormap
+                heatmap_colormap=args.heatmap_colormap,
+                heatmap_height=args.heatmap_height,
+                smoothing_sigma=args.smoothing_sigma,
+                distribution_threshold=args.distribution_threshold,
+                random_sampling_times=args.random_sampling_times,
+                sample_size=args.sample_size,
+                compare_centromeres_file=args.compare,
+                peak_prominence=args.peak_prominence,
+                min_region_size=args.min_region_size,
+                dynamic_extension=args.dynamic_extension,
+                target_mean=args.target_mean,
+                mean_tolerance=args.mean_tolerance,
+                max_extension_factor=args.max_extension_factor,
+                extension_increment=args.extension_increment
             )
         elif args.command == "hic":
             # 处理 map_type 缩写

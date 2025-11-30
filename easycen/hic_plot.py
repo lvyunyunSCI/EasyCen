@@ -5,7 +5,7 @@ Triangular Hi-C contact map visualization from .mcool files
 
 Author: Yunyun Lv
 Email: lvyunyun_sci@foxmail.com
-Version: 1.0.0
+Version: 1.1.0
 License: MIT
 """
 
@@ -49,32 +49,105 @@ def setup_logging(verbose=False):
     )
 
 # ---------------------------
-# Figure size calculation
+# Figure size calculation based on telomere length and aspect ratio
 # ---------------------------
-def calculate_figure_size(region_count, is_combined=False):
-    """Calculate appropriate figure size based on region count"""
+def calculate_figure_size(region_list, is_combined=False):
+    """
+    Calculate appropriate figure size based on telomere length and optimal aspect ratio
+    
+    Args:
+        region_list: List of region strings, e.g., ["chr6:0-1000000", "chr8:0-2000000"]
+        is_combined: Whether regions are combined in one plot
+    
+    Returns:
+        tuple: (width, height) in inches
+    """
+    # Calculate total length and max individual length
+    total_length = 0
+    max_individual_length = 0
+    individual_lengths = []
+    
+    for region in region_list:
+        chrom, pos = region.split(':')
+        start, end = map(int, pos.split('-'))
+        length = end - start
+        total_length += length
+        individual_lengths.append(length)
+        if length > max_individual_length:
+            max_individual_length = length
+    
+    # Convert to Mb for easier calculation
+    total_length_mb = total_length / 1e6
+    max_length_mb = max_individual_length / 1e6
+    num_regions = len(region_list)
+    
     if is_combined:
-        if region_count == 1:
-            width, height = 6.0, 4.0
-        elif region_count == 2:
-            width, height = 10.0, 4.0
-        elif region_count == 3:
-            width, height = 10.0, 4.0
-        elif region_count == 4:
-            width, height = 10.0, 5.0
-        elif region_count <= 6:
-            width, height = 12.0, 5.0
+        # Combined plot: multiple regions in one figure
+        # Use a more balanced approach that considers both length and number of regions
+        
+        # Base width calculation - more conservative scaling
+        if num_regions == 1:
+            width = max(5.0, min(max_length_mb * 0.8, 10.0))
+        elif num_regions == 2:
+            width = max(6.0, min(total_length_mb * 0.6, 12.0))
+        elif num_regions == 3:
+            width = max(7.0, min(total_length_mb * 0.5, 14.0))
+        elif num_regions == 4:
+            width = max(8.0, min(total_length_mb * 0.4, 16.0))
         else:
-            width = 4.0 * region_count
-            height = 12.0
+            width = max(9.0, min(total_length_mb * 0.3, 18.0))
+        
+        # Height calculation - use better aspect ratio
+        # For combined plots, we need more height to accommodate multiple regions
+        base_height = 3.0  # Base height for combined plots
+        height = base_height + (num_regions - 1) * 0.5  # Add 0.5 inches per additional region
+        height = min(height, 8.0)  # Cap maximum height
+        
     else:
-        width, height = 10.0, 4.0
-
-    width = max(4.0, min(width, 24.0))
-    height = max(3.0, min(height, 16.0))
-
-    logging.info(f"Calculated figure size: {width:.1f} x {height:.1f} for {region_count} regions")
+        # Individual plot: one region per figure
+        # Use your observation: 4Mb = 4x4 inches looks good
+        base_size = 4.0  # Base size for 4Mb region
+        
+        # Scale width proportionally to length, but with diminishing returns
+        if max_length_mb <= 4.0:
+            width = base_size * (max_length_mb / 4.0) * 1.2  # Slightly wider for small regions
+        else:
+            # For larger regions, don't scale as aggressively
+            width = base_size + (max_length_mb - 4.0) * 0.3
+        
+        # For individual plots, use a more square-like aspect ratio
+        # Height should be proportional to width but with a good minimum
+        height = max(3.0, width * 0.8)  # 0.8 aspect ratio, minimum 3 inches
+    
+    # Apply final bounds
+    width = max(4.0, min(width, 20.0))
+    height = max(2.0, min(height, 12.0))
+    
+    logging.info(f"Calculated figure size: {width:.1f} x {height:.1f} "
+                f"for {num_regions} region(s) (max {max_length_mb:.1f}Mb)")
+    
     return width, height
+
+# ---------------------------
+# Calculate font sizes based on figure size
+# ---------------------------
+def calculate_font_sizes(fig_width, fig_height):
+    """
+    Calculate appropriate font sizes based on figure dimensions
+    
+    Returns:
+        dict: Font sizes for different elements
+    """
+    # Base everything on the geometric mean of width and height
+    size_factor = math.sqrt(fig_width * fig_height)
+    
+    font_sizes = {
+        'tick': max(6, min(10, int(8 * size_factor / 5))),  # Tick labels
+        'label': max(8, min(12, int(10 * size_factor / 5))),  # Axis labels
+        'title': max(10, min(14, int(12 * size_factor / 5))),  # Title
+    }
+    
+    return font_sizes
 
 # ---------------------------
 # Colormap functions
@@ -183,6 +256,11 @@ def parse_regions(regions_arg, select_chroms=None):
         if not re.match(r'^chr[\w]+:\d+-\d+$', r):
             logging.warning(f"Region format may be invalid: {r}")
         
+        # Extract chromosome name for filtering
+        chrom = r.split(':')[0]
+        if select_chroms and chrom not in select_chroms:
+            continue
+            
         # Generate safe filename
         safe_name = re.sub(r'[<>:"/\\|?*]', '_', r.replace(":", "_").replace("-", "_"))
         regions.append((r, safe_name))
@@ -191,12 +269,49 @@ def parse_regions(regions_arg, select_chroms=None):
     return regions, False
 
 # ---------------------------
+# Generate chromosome regions
+# ---------------------------
+def generate_chromosome_regions(clr, select_chroms=None):
+    """
+    Generate regions for entire chromosomes
+    
+    Args:
+        clr: Cooler object
+        select_chroms: List of chromosomes to select (e.g., ['chr1', 'chr2'])
+    
+    Returns:
+        list: List of (region_string, name) tuples
+    """
+    chromsizes = dict(zip(clr.chromnames, clr.chromsizes))
+    regions = []
+    
+    if select_chroms:
+        # Use selected chromosomes
+        for chrom in select_chroms:
+            if chrom in chromsizes:
+                region_str = f"{chrom}:0-{chromsizes[chrom]}"
+                regions.append((region_str, chrom))
+            else:
+                logging.warning(f"Chromosome {chrom} not found in cooler file")
+    else:
+        # Use all chromosomes
+        for chrom in clr.chromnames:
+            region_str = f"{chrom}:0-{chromsizes[chrom]}"
+            regions.append((region_str, chrom))
+    
+    if not regions:
+        raise ValueError("No valid chromosomes found")
+    
+    logging.info(f"Generated {len(regions)} chromosome regions")
+    return regions
+
+# ---------------------------
 # Region boundary adjustment
 # ---------------------------
 def adjust_region_to_bounds(region, chromsizes):
     """Adjust region coordinates to fit within chromosome boundaries"""
-    chrom, pos = region.split(":")
-    start, end = map(int, pos.split("-"))
+    chrom, pos = region.split(':')
+    start, end = map(int, pos.split('-'))
 
     if chrom not in chromsizes:
         raise ValueError(f"Chromosome {chrom} not found in chromsizes.")
@@ -268,25 +383,39 @@ def plot_one_region(clr, region_list, outname, args):
 
     try:
         if TRACKC_AVAILABLE:
-            # Calculate figure size
+            # Calculate figure size based on telomere lengths
             if args.auto_size:
-                fig_width, fig_height = calculate_figure_size(len(region_list), is_combined=(len(region_list) > 1 and not args.single))
+                fig_width, fig_height = calculate_figure_size(
+                    region_list, 
+                    is_combined=(len(region_list) > 1 and not args.single)
+                )
             else:
                 fig_width, fig_height = args.fig_width, args.fig_height
             
-            logging.info(f"Creating figure with size: {fig_width:.1f} x {fig_height:.1f}")
+            # Calculate appropriate font sizes
+            font_sizes = calculate_font_sizes(fig_width, fig_height)
+            effective_tick_fontsize = min(args.tick_fontsize, font_sizes['tick'])
+            
+            logging.info(f"Creating figure with size: {fig_width:.1f} x {fig_height:.1f}, "
+                        f"tick fontsize: {effective_tick_fontsize}")
             
             # Build tenon layout using trackc
-            ten = tc.tenon(figsize=(fig_width, 1))
+            ten = tc.tenon(figsize=(fig_width, fig_height))
 
-            # Parse bottom panel heights
+            # Parse bottom panel heights based on total figure height
             try:
                 heights = [float(h.strip()) for h in args.bottom_heights.split(",")]
                 if len(heights) < 2:
                     raise ValueError("Need at least 2 heights for bottom panels")
+                
+                # Normalize heights to fit within figure height
+                total_specified = sum(heights)
+                if total_specified > 0:
+                    heights = [h * fig_height / total_specified for h in heights]
             except ValueError as e:
                 logging.error(f"Invalid bottom_heights format: {e}")
-                heights = [fig_height*0.8, fig_height*0.2]  # Default values
+                # Default: 70% for heatmap, 30% for scale track (more space for labels)
+                heights = [fig_height * 0.7, fig_height * 0.3]
 
             # Add bottom panels
             for h in heights:
@@ -319,14 +448,14 @@ def plot_one_region(clr, region_list, outname, args):
 
             tc.pl.mapC(**mapC_args)
 
-            # Draw scale track below
+            # Draw scale track below with adjusted font size
             scale_track_args = {
                 'ax': ten.axs(1), 
                 'regions': region_list, 
                 'scale_adjust': args.scale_adjust,
                 'intervals': args.intervals,
                 'tick_rotation': args.tick_rotation,
-                'tick_fontsize': args.tick_fontsize,
+                'tick_fontsize': effective_tick_fontsize,
             }
             tc.pl.multi_scale_track(**scale_track_args)
 
@@ -346,9 +475,15 @@ def plot_one_region(clr, region_list, outname, args):
             
             # Calculate figure size for fallback
             if args.auto_size:
-                fig_width, fig_height = calculate_figure_size(len(region_list), is_combined=(len(region_list) > 1 and not args.single))
+                fig_width, fig_height = calculate_figure_size(
+                    region_list, 
+                    is_combined=(len(region_list) > 1 and not args.single)
+                )
             else:
                 fig_width, fig_height = args.fig_width, args.fig_height
+                
+            # Calculate font sizes for matplotlib fallback
+            font_sizes = calculate_font_sizes(fig_width, fig_height)
                 
             fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height))
             
@@ -387,9 +522,12 @@ def plot_one_region(clr, region_list, outname, args):
                 
                 plt.colorbar(im, ax=ax, label='Contact frequency')
             
-            ax.set_title(f"Hi-C Contact Map: {', '.join(region_list)}")
-            ax.set_xlabel('Genomic Position')
-            ax.set_ylabel('Genomic Position')
+            # Set titles and labels with appropriate font sizes
+            ax.set_title(f"Hi-C Contact Map: {', '.join(region_list)}", 
+                        fontsize=font_sizes['title'])
+            ax.set_xlabel('Genomic Position', fontsize=font_sizes['label'])
+            ax.set_ylabel('Genomic Position', fontsize=font_sizes['label'])
+            ax.tick_params(axis='both', which='major', labelsize=font_sizes['tick'])
             
             plt.tight_layout()
             plt.savefig(str(out_path), dpi=300, bbox_inches='tight')
@@ -431,10 +569,12 @@ def validate_args(args):
     if args.fig_width <= 0 or args.fig_height <= 0:
         raise ValueError("Figure dimensions must be positive")
     
-    # Validate regions
-    regions, _ = parse_regions(args.regions, args.select_chroms)
-    if not regions:
-        raise ValueError("No valid regions provided")
+    # Validate regions or select_chroms
+    if args.regions and args.select_chroms:
+        logging.warning("Both --regions and --select_chroms provided, using --select_chroms")
+    
+    if not args.regions and not args.select_chroms:
+        raise ValueError("Either --regions or --select_chroms must be provided")
     
     return True
 
@@ -446,7 +586,7 @@ def plot_hic_triangular(mcool_file, resolution, regions, output_dir,
                        cmap="fruitpunch3", vmin=None, vmax=None,
                        fig_width=6.0, fig_height=4.0, auto_size=True,
                        bottom_heights="3,0.4", scale_adjust="Mb", intervals=1, 
-                       tick_rotation=0.0, tick_fontsize=10.0, verbose=False):
+                       tick_rotation=0.0, tick_fontsize=8.0, verbose=False):  # Changed default tick_fontsize to 8
     """
     Main function to plot triangular Hi-C contact maps
     
@@ -516,12 +656,33 @@ def plot_hic_triangular(mcool_file, resolution, regions, output_dir,
         logging.info(f"Successfully loaded cooler: {cooler_ref}")
         logging.info(f"Available chromosomes: {clr.chromnames}")
 
-        # Parse regions
-        region_items, is_bed = parse_regions(args.regions, args.select_chroms)
+        # Parse select_chroms if provided
+        if args.select_chroms:
+            select_chroms_list = [chrom.strip() for chrom in args.select_chroms.split(",")]
+            logging.info(f"Selected chromosomes: {select_chroms_list}")
+            
+            # Generate regions for selected chromosomes
+            region_items = generate_chromosome_regions(clr, select_chroms_list)
+            
+            # Adjust regions to chromosome boundaries
+            chromsizes = dict(zip(clr.chromnames, clr.chromsizes))
+            region_items = [(adjust_region_to_bounds(r[0], chromsizes), r[1]) for r in region_items]
+            
+            # Generate combined plot for selected chromosomes
+            region_list = [r[0] for r in region_items]
+            chrom_names = "_".join(select_chroms_list)
+            outname = Path(args.outdir) / f"selected_chromosomes_{chrom_names}.triangle_hic.pdf"
+            logging.info(f"Generating combined plot for selected chromosomes: {select_chroms_list}")
+            plot_one_region(clr, region_list, str(outname), args)
+            return
+            
+        else:
+            # Original logic for regions
+            region_items, is_bed = parse_regions(args.regions, args.select_chroms)
 
-        # Adjust regions to chromosome boundaries
-        chromsizes = dict(zip(clr.chromnames, clr.chromsizes))
-        region_items = [(adjust_region_to_bounds(r[0], chromsizes), r[1]) for r in region_items]
+            # Adjust regions to chromosome boundaries
+            chromsizes = dict(zip(clr.chromnames, clr.chromsizes))
+            region_items = [(adjust_region_to_bounds(r[0], chromsizes), r[1]) for r in region_items]
 
         # Check trackc availability
         if not TRACKC_AVAILABLE:
@@ -568,10 +729,10 @@ def main():
     )
     parser.add_argument("--mcool", required=True, help="Input .mcool file path")
     parser.add_argument("--resolution", required=True, type=int, help="Resolution for Hi-C data")
-    parser.add_argument("--regions", required=True, help="Regions string or BED file path")
+    parser.add_argument("--regions", help="Regions string or BED file path")
+    parser.add_argument("--select_chroms", help="Select specific chromosomes to plot together (comma-separated, e.g., chr1,chr2,chr3)")
     parser.add_argument("--outdir", required=True, help="Output directory")
     parser.add_argument("--single", action="store_true", help="Generate separate plot for each region")
-    parser.add_argument("--select_chroms", help="Select specific chromosomes from BED file (comma-separated)")
     parser.add_argument("--map_type", default="triangle", choices=['square','squ','triangle','tri','rectangle','rec'],
                         help="Map type for heatmap display")
     parser.add_argument("--cmap", default="fruitpunch3", help="Colormap for heatmap")
@@ -585,7 +746,7 @@ def main():
     parser.add_argument("--scale_adjust", default="Mb", help="Scale adjustment for track")
     parser.add_argument("--intervals", type=int, default=1, help="Number of intervals for track")
     parser.add_argument("--tick_rotation", type=float, default=0.0, help="Rotation angle for ticks")
-    parser.add_argument("--tick_fontsize", type=float, default=10.0, help="Font size for ticks")
+    parser.add_argument("--tick_fontsize", type=float, default=8.0, help="Font size for ticks")  # Changed default to 8
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     
     args = parser.parse_args()
@@ -598,13 +759,20 @@ def main():
     elif args.map_type in ['rec']:
         args.map_type = 'rectangle'
     
+    # Validate that either regions or select_chroms is provided
+    if not args.regions and not args.select_chroms:
+        print("Error: Either --regions or --select_chroms must be provided")
+        sys.exit(1)
+    
     # Print EasyCen header
     print("=" * 60)
-    print("EASYCEN Hi-C PLOTTING MODULE")
+    print("EASYCEN Hi-C PLOTTING MODULE v1.1.0")
     print("=" * 60)
     print(f"Input file:    {args.mcool}")
     print(f"Resolution:    {args.resolution}")
     print(f"Output dir:    {args.outdir}")
+    if args.select_chroms:
+        print(f"Selected chromosomes: {args.select_chroms}")
     print(f"Trackc available: {TRACKC_AVAILABLE}")
     print("=" * 60)
     
