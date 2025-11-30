@@ -5,7 +5,7 @@ Centromere visualization with boundary optimization and statistical analysis
 
 Author: Yunyun Lv
 Email: lvyunyun_sci@foxmail.com
-Version: 1.0.0
+Version: 2.1.0
 License: MIT
 """
 
@@ -25,7 +25,7 @@ import re
 from matplotlib.colors import LinearSegmentedColormap, to_rgba
 import warnings
 from scipy.ndimage import gaussian_filter1d
-from scipy.stats import norm
+from scipy.stats import norm, normaltest
 from scipy.signal import find_peaks
 import random
 warnings.filterwarnings('ignore')
@@ -51,12 +51,14 @@ plt.rcParams.update({
 })
 
 class CentromereOptimizer:
-    """Centromere boundary optimization using multi-threshold randomized Gaussian distribution"""
+    """Centromere boundary optimization using multi-threshold randomized Gaussian distribution with adaptive sigma and dynamic extension"""
     
-    def __init__(self, kmer_weight=0.6, feature_weight=0.4, extension_bp=500000,
-                 smoothing_sigma=5.0, distribution_threshold=0.15,
-                 random_sampling_times=10000, sample_size=None,
-                 peak_prominence=0.1, min_region_size=50000):
+    def __init__(self, kmer_weight=0.6, feature_weight=0.4, extension_bp=100000,  # Changed default to 100k
+                 smoothing_sigma=2.0, distribution_threshold=0.05,
+                 random_sampling_times=100000, sample_size=None,
+                 peak_prominence=0.1, min_region_size=50000,
+                 dynamic_extension=True, target_mean=0.5, mean_tolerance=0.01,  # New parameters for dynamic extension
+                 max_extension_factor=5.0, extension_increment=50000):  # Maximum extension and increment
         self.kmer_weight = kmer_weight
         self.feature_weight = feature_weight
         self.extension_bp = extension_bp
@@ -67,9 +69,16 @@ class CentromereOptimizer:
         self.peak_prominence = peak_prominence
         self.min_region_size = min_region_size
         
+        # Dynamic extension parameters
+        self.dynamic_extension = dynamic_extension
+        self.target_mean = target_mean
+        self.mean_tolerance = mean_tolerance
+        self.max_extension_factor = max_extension_factor
+        self.extension_increment = extension_increment
+        
     def optimize_boundaries(self, known_centromere, kmer_data, feature_data, chrom_length):
         """
-        Optimize centromere boundaries using composite scoring
+        Optimize centromere boundaries using composite scoring with adaptive sigma and dynamic extension
         
         Args:
             known_centromere: Dictionary with known centromere coordinates
@@ -84,9 +93,25 @@ class CentromereOptimizer:
         end = known_centromere['end']
         center = (start + end) // 2
         
-        search_start = max(0, start - self.extension_bp)
-        search_end = min(chrom_length, end + self.extension_bp)
+        # Apply dynamic extension if enabled
+        if self.dynamic_extension:
+            extension_result = self._apply_dynamic_extension(
+                start, end, kmer_data, feature_data, chrom_length
+            )
+            search_start = extension_result['search_start']
+            search_end = extension_result['search_end']
+            final_extension = extension_result['final_extension']
+            iterations = extension_result['iterations']
+            mean_history = extension_result['mean_history']
+        else:
+            # Use fixed extension
+            search_start = max(0, start - self.extension_bp)
+            search_end = min(chrom_length, end + self.extension_bp)
+            final_extension = self.extension_bp
+            iterations = 1
+            mean_history = []
         
+        # Extract data from the final search region
         search_positions = []
         kmer_values = []
         feature_values = []
@@ -115,8 +140,11 @@ class CentromereOptimizer:
         composite_scores = (self.kmer_weight * kmer_norm + 
                           self.feature_weight * feature_norm)
         
-        composite_smoothed = gaussian_filter1d(composite_scores, self.smoothing_sigma)
+        # Adaptive sigma calculation
+        adaptive_sigma = self._calculate_adaptive_sigma(composite_scores, positions)
+        composite_smoothed = gaussian_filter1d(composite_scores, adaptive_sigma)
         
+        # Peak detection with adaptive sigma
         if len(composite_smoothed) > 1:
             distance = max(1, len(composite_smoothed) // 20)
             peaks, peak_properties = find_peaks(composite_smoothed, 
@@ -126,12 +154,23 @@ class CentromereOptimizer:
             peaks, peak_properties = np.array([]), {}
         
         optimization_result = self._find_boundary_aggressive_multithreshold(
-            positions, composite_scores, composite_smoothed, peaks, start, end, chrom_length
+            positions, composite_scores, composite_smoothed, peaks, start, end, chrom_length, adaptive_sigma
         )
         
         left_boundary = optimization_result['left_boundary']
         right_boundary = optimization_result['right_boundary']
         threshold_info = optimization_result['threshold_info']
+        
+        # Add dynamic extension info to threshold_info
+        threshold_info['dynamic_extension'] = {
+            'enabled': self.dynamic_extension,
+            'final_extension': final_extension,
+            'iterations': iterations,
+            'target_mean': self.target_mean,
+            'mean_tolerance': self.mean_tolerance,
+            'mean_history': mean_history,
+            'initial_extension': self.extension_bp
+        }
         
         min_centromere_size = 50000
         if right_boundary - left_boundary < min_centromere_size:
@@ -153,11 +192,190 @@ class CentromereOptimizer:
             'peaks': peaks.tolist() if peaks is not None else [],
             'peak_properties': peak_properties,
             'was_optimized': True,
-            'optimization_method': 'aggressive_multi_threshold_clt',
-            'threshold_info': threshold_info
+            'optimization_method': 'adaptive_sigma_multi_threshold_dynamic_extension',
+            'threshold_info': threshold_info,
+            'adaptive_sigma': adaptive_sigma,
+            'dynamic_extension_info': {
+                'final_extension': final_extension,
+                'iterations': iterations,
+                'mean_history': mean_history
+            }
         })
         
         return optimized
+    
+    def _apply_dynamic_extension(self, start, end, kmer_data, feature_data, chrom_length):
+        """
+        Apply dynamic extension to ensure sampling mean is near target mean
+        
+        Args:
+            start: Known centromere start
+            end: Known centromere end
+            kmer_data: K-mer density data
+            feature_data: Feature percentage data
+            chrom_length: Chromosome length
+            
+        Returns:
+            Dictionary with final search region and extension info
+        """
+        current_extension = self.extension_bp
+        max_extension = min(chrom_length // 2, int(self.extension_bp * self.max_extension_factor))
+        
+        iterations = 0
+        max_iterations = 1000
+        mean_history = []
+        
+        # Store the best extension found so far
+        best_extension = current_extension
+        best_mean_diff = float('inf')
+        
+        while iterations < max_iterations:
+            # Calculate current search region
+            search_start = max(0, start - current_extension)
+            search_end = min(chrom_length, end + current_extension)
+            
+            # Extract data from current search region
+            search_positions, kmer_values, feature_values = self._extract_region_data(
+                search_start, search_end, kmer_data, feature_data
+            )
+            
+            if not search_positions:
+                # No data in this region, extend further
+                current_extension += self.extension_increment
+                iterations += 1
+                continue
+            
+            # Calculate composite scores for the entire search region
+            positions = np.array(search_positions)
+            kmer_vals = np.array(kmer_values)
+            feature_vals = np.array(feature_values)
+            
+            if len(kmer_vals) == 0 or len(feature_vals) == 0:
+                current_extension += self.extension_increment
+                iterations += 1
+                continue
+            
+            kmer_norm = self._normalize_signal(kmer_vals)
+            feature_norm = 1 - self._normalize_signal(feature_vals)
+            
+            composite_scores = (self.kmer_weight * kmer_norm + 
+                              self.feature_weight * feature_norm)
+            
+            # Calculate mean of ALL composite scores in the search region
+            region_mean = np.mean(composite_scores)
+            mean_diff = abs(region_mean - self.target_mean)
+            
+            mean_history.append({
+                'iteration': iterations,
+                'extension': current_extension,
+                'mean': region_mean,
+                'mean_diff': mean_diff,
+                'search_start': search_start,
+                'search_end': search_end,
+                'n_points': len(composite_scores)
+            })
+            
+            print(f"Iteration {iterations}: Extension={current_extension/1000:.1f}kb, Mean={region_mean:.3f}, Diff={mean_diff:.3f}, Points={len(composite_scores)}")
+            
+            # Update best extension found
+            if mean_diff < best_mean_diff:
+                best_mean_diff = mean_diff
+                best_extension = current_extension
+            
+            # Check if mean is within tolerance
+            if mean_diff <= self.mean_tolerance:
+                print(f"Dynamic extension converged after {iterations} iterations")
+                break
+            
+            # Adjust extension based on mean difference
+            # If mean is too high (>0.5), we need to extend more to include more low-score regions
+            # If mean is too low (<0.5), we need to reduce extension to focus on higher-score regions
+            if region_mean > self.target_mean:
+                # Mean is too high - extend more to include more low-score flanking regions
+                extension_adjustment = self.extension_increment
+            else:
+                # Mean is too low - reduce extension to focus on higher-score regions
+                extension_adjustment = -self.extension_increment
+            
+            current_extension += extension_adjustment
+            
+            # Ensure we don't exceed maximum extension or go below minimum
+            if current_extension > max_extension:
+                current_extension = max_extension
+                print(f"Reached maximum extension: {max_extension/1000:.1f}kb")
+                # Use the best extension we found
+                if best_mean_diff < float('inf'):
+                    current_extension = best_extension
+                    print(f"Using best extension found: {best_extension/1000:.1f}kb (mean_diff={best_mean_diff:.3f})")
+                break
+                
+            if current_extension < self.extension_bp:
+                current_extension = self.extension_bp
+                print(f"Reached minimum extension: {current_extension/1000:.1f}kb")
+                break
+                
+            iterations += 1
+        
+        if iterations >= max_iterations:
+            print(f"Dynamic extension reached maximum iterations ({max_iterations}), using best extension")
+            current_extension = best_extension
+        
+        final_search_start = max(0, start - current_extension)
+        final_search_end = min(chrom_length, end + current_extension)
+        
+        return {
+            'search_start': final_search_start,
+            'search_end': final_search_end,
+            'final_extension': current_extension,
+            'iterations': iterations,
+            'mean_history': mean_history,
+            'best_mean_diff': best_mean_diff
+        }
+    
+    def _extract_region_data(self, search_start, search_end, kmer_data, feature_data):
+        """Extract data from specified region"""
+        search_positions = []
+        kmer_values = []
+        feature_values = []
+        
+        for kmer_point in kmer_data:
+            if search_start <= kmer_point['start'] <= search_end:
+                search_positions.append(kmer_point['start'])
+                kmer_values.append(kmer_point['value'])
+                feature_val = 0
+                for feature_point in feature_data:
+                    if feature_point['start'] == kmer_point['start']:
+                        feature_val = feature_point['value']
+                        break
+                feature_values.append(feature_val)
+        
+        return search_positions, kmer_values, feature_values
+    
+    def _calculate_adaptive_sigma(self, composite_scores, positions):
+        """Calculate adaptive sigma based on peak count"""
+        # Initial smoothing with sigma=2
+        initial_sigma = 2.0
+        initial_smoothed = gaussian_filter1d(composite_scores, initial_sigma)
+        
+        # Detect initial peaks
+        if len(initial_smoothed) > 1:
+            distance = max(1, len(initial_smoothed) // 10)
+            initial_peaks, _ = find_peaks(initial_smoothed, 
+                                        prominence=self.peak_prominence,
+                                        distance=distance)
+            n_peaks = len(initial_peaks)
+        else:
+            n_peaks = 0
+        
+        # Calculate new sigma based on peak count: sigma = min(2**n, 25)
+        t = (n_peaks - 1) / 9.0
+        h = 15.0
+        l = 2
+        p = 0.3
+        adaptive_sigma = l + (h - l) * (t ** p)
+        
+        print(f"Detected {n_peaks} peaks, using adaptive sigma: {adaptive_sigma}")
+        return adaptive_sigma
     
     def _normalize_signal(self, signal_data):
         """Normalize signal data to 0-1 range"""
@@ -167,8 +385,8 @@ class CentromereOptimizer:
             return np.zeros_like(signal_data)
         return (signal_data - min_val) / (max_val - min_val)
     
-    def _find_boundary_aggressive_multithreshold(self, positions, scores, smoothed_scores, peaks, original_start, original_end, chrom_length):
-        """Find boundaries using multiple threshold levels"""
+    def _find_boundary_aggressive_multithreshold(self, positions, scores, smoothed_scores, peaks, original_start, original_end, chrom_length, adaptive_sigma):
+        """Find boundaries using multiple threshold levels with adaptive peak handling - FIXED SAMPLING LOGIC"""
         if len(smoothed_scores) < 10:
             return {
                 'left_boundary': original_start,
@@ -176,10 +394,21 @@ class CentromereOptimizer:
                 'threshold_info': {'error': 'insufficient_data'}
             }
         
+        # Boundary determination for multiple peaks
+        if len(peaks) > 1:
+            print(f"Multiple peaks detected ({len(peaks)}), using multi-peak boundary determination")
+            multi_peak_result = self._handle_multiple_peaks(positions, smoothed_scores, peaks, original_start, original_end)
+            if multi_peak_result:
+                return multi_peak_result
+        
+        # Correction: sample from original composite scores, not smoothed scores
         if self.sample_size is None:
-            sample_size = min(30, len(smoothed_scores) // 10)
+            if 100 < len(scores):
+                sample_size = 100
+            else:
+                sample_size = len(scores) // 2
         else:
-            sample_size = min(self.sample_size, len(smoothed_scores))
+            sample_size = min(self.sample_size, len(scores))
         
         if sample_size < 5:
             return {
@@ -188,31 +417,73 @@ class CentromereOptimizer:
                 'threshold_info': {'error': 'sample_size_too_small'}
             }
         
+        # Corrected random sampling logic - sample from original composite score distribution
+        print(f"Performing {self.random_sampling_times} random samplings with sample size {sample_size}")
         sample_means = []
-        for _ in range(self.random_sampling_times):
-            random_sample = np.random.choice(smoothed_scores, size=sample_size, replace=True)
-            sample_means.append(np.mean(random_sample))
+        for i in range(self.random_sampling_times):
+            # Random sampling from original composite scores, not smoothed ones
+            random_sample = np.random.choice(scores, size=sample_size, replace=True)
+            sample_mean = np.mean(random_sample)
+            sample_means.append(sample_mean)
+            
+            # Show progress every 10000 samples
+            if (i + 1) % 10000 == 0:
+                print(f"Completed {i + 1}/{self.random_sampling_times} samplings...")
         
+        # Initialize variables
+        mu_sampling = 0.0
+        std_sampling = 1.0
+        normality_p_value = 1.0
+        is_normal = True
+        
+        # Validate normality of sampling distribution
         try:
             mu_sampling, std_sampling = norm.fit(sample_means)
-        except:
+            
+            # Normality test
+            if len(sample_means) > 3:
+                try:
+                    _, normality_p_value = normaltest(sample_means)
+                    is_normal = normality_p_value > 0.05
+                except:
+                    normality_p_value = 1.0
+                    is_normal = True
+            else:
+                normality_p_value = 1.0
+                is_normal = True
+            
+            print(f"Sampling distribution: mean={mu_sampling:.4f}, std={std_sampling:.4f}, n={len(sample_means)}")
+            print(f"Normality test p-value: {normality_p_value:.4f} ({'normal' if is_normal else 'non-normal'})")
+            
+            # If distribution is not normal, issue warning but continue processing
+            if not is_normal:
+                print("Warning: Sampling distribution may not be perfectly normal, but continuing with threshold calculation")
+                
+        except Exception as e:
+            print(f"Error fitting sampling distribution: {e}")
             try:
-                mu_sampling, std_sampling = norm.fit(smoothed_scores)
+                # Fallback to using statistics from original composite scores if sampling fitting fails
+                mu_sampling, std_sampling = norm.fit(scores)
+                print(f"Fallback to original scores distribution: mean={mu_sampling:.4f}, std={std_sampling:.4f}")
+                normality_p_value = 1.0
+                is_normal = True
             except:
-                return {
-                    'left_boundary': original_start,
-                    'right_boundary': original_end,
-                    'threshold_info': {'error': 'distribution_fitting_failed'}
-                }
+                print("Failed to fit any distribution, using default values")
+                mu_sampling = np.mean(scores) if len(scores) > 0 else 0.5
+                std_sampling = np.std(scores) if len(scores) > 0 else 0.1
+                normality_p_value = 1.0
+                is_normal = True
         
+        # Calculate thresholds based on sampling distribution
+        zvalue=norm.ppf(1 - self.distribution_threshold/2)
         threshold_levels = [
-            mu_sampling - 0.5 * std_sampling,
-            mu_sampling - 0.3 * std_sampling,
-            mu_sampling - self.distribution_threshold * std_sampling,
+            mu_sampling - zvalue * 1 * std_sampling,
+            mu_sampling - zvalue * 0.95 * std_sampling,
+            mu_sampling - zvalue * 0.5 * std_sampling,
             mu_sampling - 0.01 * std_sampling
         ]
         
-        threshold_names = ['very_aggressive', 'aggressive', 'standard', 'conservative']
+        threshold_names = ['very_aggressive(select)', 'aggressive', 'standard', 'conservative']
         
         all_boundaries = []
         for i, threshold in enumerate(threshold_levels):
@@ -226,6 +497,7 @@ class CentromereOptimizer:
         
         selected_boundaries = self._select_optimal_boundaries(all_boundaries, original_start, original_end, chrom_length)
         
+        # Ensure all necessary keys exist
         threshold_info = {
             'sample_size': sample_size,
             'sampling_times': self.random_sampling_times,
@@ -233,7 +505,18 @@ class CentromereOptimizer:
             'sampling_std': std_sampling,
             'threshold_levels': dict(zip(threshold_names, threshold_levels)),
             'all_boundaries': all_boundaries,
-            'selected_threshold': selected_boundaries['threshold_level']
+            'selected_threshold': selected_boundaries.get('threshold_level', 'standard'),
+            'adaptive_sigma': adaptive_sigma,
+            'peak_count': len(peaks),
+            'sampling_distribution_stats': {
+                'min': float(np.min(sample_means)) if len(sample_means) > 0 else 0.0,
+                'max': float(np.max(sample_means)) if len(sample_means) > 0 else 1.0,
+                'median': float(np.median(sample_means)) if len(sample_means) > 0 else 0.5,
+                'skewness': float(pd.Series(sample_means).skew()) if len(sample_means) > 2 else 0,
+                'normality_p_value': float(normality_p_value),
+                'is_normal': is_normal,
+                'sample_means': sample_means  # Save sample means for visualization
+            }
         }
         
         return {
@@ -241,6 +524,90 @@ class CentromereOptimizer:
             'right_boundary': selected_boundaries['right_boundary'],
             'threshold_info': threshold_info
         }
+    
+    def _handle_multiple_peaks(self, positions, smoothed_scores, peaks, original_start, original_end):
+        """Handle boundary determination in multi-peak scenarios"""
+        peak_positions = positions[peaks]
+        peak_values = smoothed_scores[peaks]
+        
+        # Sort peaks by position
+        sorted_indices = np.argsort(peak_positions)
+        sorted_peaks = peak_positions[sorted_indices]
+        sorted_values = peak_values[sorted_indices]
+        
+        # Find leftmost and rightmost peaks
+        leftmost_peak = sorted_peaks[0]
+        rightmost_peak = sorted_peaks[-1]
+        
+        # Calculate minimum distance between peaks
+        if len(sorted_peaks) > 1:
+            peak_distances = np.diff(sorted_peaks)
+            min_peak_distance = np.min(peak_distances)
+        else:
+            min_peak_distance = 100000  # Default value
+        
+        # Find boundaries in multi-peak region
+        left_boundary = self._find_boundary_near_peak(positions, smoothed_scores, leftmost_peak, 'left')
+        right_boundary = self._find_boundary_near_peak(positions, smoothed_scores, rightmost_peak, 'right')
+        
+        # Ensure boundary reasonableness
+        if left_boundary >= right_boundary:
+            # Use original boundaries if boundaries cross
+            return {
+                'left_boundary': original_start,
+                'right_boundary': original_end,
+                'threshold_info': {'error': 'boundary_crossing_in_multi_peak'}
+            }
+        
+        # Check region size
+        region_size = right_boundary - left_boundary
+        if region_size < self.min_region_size:
+            # Extend region to minimum size
+            center = (left_boundary + right_boundary) // 2
+            left_boundary = max(0, center - self.min_region_size // 2)
+            right_boundary = left_boundary + self.min_region_size
+        
+        return {
+            'left_boundary': left_boundary,
+            'right_boundary': right_boundary,
+            'threshold_info': {
+                'multi_peak_handling': True,
+                'peak_count': len(peaks),
+                'leftmost_peak': leftmost_peak,
+                'rightmost_peak': rightmost_peak,
+                'min_peak_distance': min_peak_distance,
+                'region_size': region_size
+            }
+        }
+    
+    def _find_boundary_near_peak(self, positions, smoothed_scores, peak_position, direction='left'):
+        """Find boundary point near peak"""
+        peak_idx = np.where(positions == peak_position)[0][0]
+        
+        if direction == 'left':
+            # Search left for boundary
+            search_range = range(peak_idx, -1, -1)
+        else:
+            # Search right for boundary
+            search_range = range(peak_idx, len(positions))
+        
+        # Calculate gradient changes
+        gradients = np.gradient(smoothed_scores)
+        
+        boundary_idx = peak_idx
+        for i in search_range:
+            if direction == 'left':
+                # Left search: find position with significant gradient change
+                if i > 0 and abs(gradients[i]) < 0.001 and smoothed_scores[i] < smoothed_scores[peak_idx] * 0.3:
+                    boundary_idx = i
+                    break
+            else:
+                # Right search: find position with significant gradient change
+                if i < len(positions) - 1 and abs(gradients[i]) < 0.001 and smoothed_scores[i] < smoothed_scores[peak_idx] * 0.3:
+                    boundary_idx = i
+                    break
+        
+        return positions[boundary_idx]
     
     def _find_boundaries_at_threshold(self, positions, smoothed_scores, threshold, peaks):
         """Find regions above specified threshold"""
@@ -336,12 +703,14 @@ class CentromereOptimizer:
 class CentromereVisualizer:
     """EasyCen visualization toolkit with boundary optimization"""
     
-    def __init__(self, results_dir, known_centromeres_file=None, kmer_weight=0.6, 
-                 feature_weight=0.4, optimization_extension=500000,
+    def __init__(self, results_dir, known_centromeres_file=None, kmer_weight=0.4, 
+                 feature_weight=0.6, optimization_extension=100000,  # Changed default to 100k
                  heatmap_colormap='viridis', heatmap_height=0.3, output_dir=None,
-                 smoothing_sigma=2.0, distribution_threshold=0.15,
-                 random_sampling_times=10000, sample_size=None, compare_centromeres_file=None,
-                 peak_prominence=0.1, min_region_size=50000):
+                 smoothing_sigma=2.0, distribution_threshold=0.05,
+                 random_sampling_times=100000, sample_size=None, compare_centromeres_file=None,
+                 peak_prominence=0.1, min_region_size=50000, dynamic_extension=True,
+                 target_mean=0.5, mean_tolerance=0.01, max_extension_factor=5.0,
+                 extension_increment=50000):
         self.results_dir = Path(results_dir)
         self.known_centromeres_file = known_centromeres_file
         self.output_dir = Path(output_dir) if output_dir else self.results_dir / "visualization"
@@ -362,7 +731,12 @@ class CentromereVisualizer:
             random_sampling_times=random_sampling_times,
             sample_size=sample_size,
             peak_prominence=peak_prominence,
-            min_region_size=min_region_size
+            min_region_size=min_region_size,
+            dynamic_extension=dynamic_extension,
+            target_mean=target_mean,
+            mean_tolerance=mean_tolerance,
+            max_extension_factor=max_extension_factor,
+            extension_increment=extension_increment
         )
         
         self.colors = {
@@ -395,6 +769,7 @@ class CentromereVisualizer:
             'distribution_mean': '#E74C3C',
             'distribution_std': '#F39C12',
             'clt_threshold': '#27AE60',
+            'dynamic_extension': '#E67E22',  # New color for dynamic extension visualization
         }
         
         self.heatmap_cmaps = {
@@ -717,6 +1092,7 @@ class CentromereVisualizer:
             self.optimized_centromeres[chrom] = []
             
             for known_centromere in known_centromeres:
+                print(f"Optimizing boundaries for {chrom}...")
                 optimized = self.optimizer.optimize_boundaries(
                     known_centromere,
                     chrom_data['kmer_density'],
@@ -732,9 +1108,7 @@ class CentromereVisualizer:
         
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        weight_suffix = f"_kmer{self.optimizer.kmer_weight}_feature{self.optimizer.feature_weight}"
-        sampling_suffix = f"_samples{self.optimizer.random_sampling_times}"
-        bed_file = self.output_dir / f"optimized_centromeres{weight_suffix}{sampling_suffix}.bed"
+        bed_file = self.output_dir / f"optimized_centromeres.bed"
         
         with open(bed_file, 'w') as f:
             f.write(f"# EasyCen optimized centromere boundaries\n")
@@ -742,6 +1116,7 @@ class CentromereVisualizer:
             f.write(f"# Optimization parameters: kmer_weight={self.optimizer.kmer_weight}, "
                    f"feature_weight={self.optimizer.feature_weight}, "
                    f"extension={self.optimizer.extension_bp}bp\n")
+            f.write(f"# Dynamic extension: {self.optimizer.dynamic_extension}\n")
             f.write(f"# Format: chrom\\tstart\\tend\\tname\\tscore\\tstrand\n")
             
             for chrom in self._natural_sort(self.optimized_centromeres.keys()):
@@ -864,15 +1239,9 @@ class CentromereVisualizer:
                         start_mb_display = start_mb
                         end_mb_display = end_mb
                     
-                    if actual_width < min_width:
-                        rect = Rectangle((start_mb_display, i-0.2), display_width, 0.4,
-                                       facecolor=color, alpha=0.7, 
-                                       edgecolor='darkred', linewidth=1.0,
-                                       hatch='//')
-                    else:
-                        rect = Rectangle((start_mb_display, i-0.2), display_width, 0.4,
-                                       facecolor=color, alpha=0.7, 
-                                       edgecolor='darkred', linewidth=1.0)
+                    rect = Rectangle((start_mb_display, i-0.2), display_width, 0.4,
+                                   facecolor=color, alpha=0.7, 
+                                   edgecolor='darkred', linewidth=1.0)
                     ax_main.add_patch(rect)
                 
                 for centromere in primary_regions:
@@ -899,15 +1268,9 @@ class CentromereVisualizer:
                         start_mb_display = start_mb
                         end_mb_display = end_mb
                     
-                    if actual_width < min_width:
-                        rect = Rectangle((start_mb_display, i-0.4), display_width, 0.8,
-                                       facecolor=color, alpha=0.9, 
-                                       edgecolor=edge_color, linewidth=2.0,
-                                       hatch='\\\\')
-                    else:
-                        rect = Rectangle((start_mb_display, i-0.4), display_width, 0.8,
-                                       facecolor=color, alpha=0.9, 
-                                       edgecolor=edge_color, linewidth=2.0)
+                    rect = Rectangle((start_mb_display, i-0.4), display_width, 0.8,
+                                   facecolor=color, alpha=0.9, 
+                                   edgecolor=edge_color, linewidth=2.0)
                     ax_main.add_patch(rect)
                     
                     center_mb = centromere['center_mb']
@@ -944,6 +1307,8 @@ class CentromereVisualizer:
         title = 'EasyCen - Genome-wide Centromere Distribution'
         if self.optimized_centromeres:
             title += ' (with Boundary Optimization)'
+            if self.optimizer.dynamic_extension:
+                title += ' [Dynamic Extension]'
         elif not self.known_centromeres:
             title += ' (Analysis Results)'
         ax_main.set_title(title, fontsize=18, fontweight='bold', pad=20)
@@ -973,12 +1338,6 @@ class CentromereVisualizer:
             ])
         
         legend_elements.extend([
-            Patch(facecolor='gray', alpha=0.9, hatch='\\\\', 
-                  edgecolor='darkorange', linewidth=2.0, 
-                  label='Small Primary (enlarged)'),
-            Patch(facecolor='gray', alpha=0.7, hatch='//', 
-                  edgecolor='darkred', linewidth=1.0, 
-                  label='Small Candidate (enlarged)'),
             plt.Line2D([0], [0], color='black', linewidth=4, label='Chromosome')
         ])
         
@@ -994,6 +1353,12 @@ class CentromereVisualizer:
                           linewidth=2, linestyle=':', label='Published Centromere')
             )
         
+        if self.optimizer.dynamic_extension:
+            legend_elements.append(
+                plt.Line2D([0], [0], color=self.colors['dynamic_extension'], 
+                          linewidth=2, linestyle='-.', label='Dynamic Extension')
+            )
+        
         ax_main.legend(handles=legend_elements, loc='upper right', 
                       framealpha=0.95, fancybox=True, shadow=True, 
                       fontsize=10, frameon=True, ncol=2)
@@ -1005,6 +1370,7 @@ class CentromereVisualizer:
         optimized_centromeres = []
         compare_centromeres = []
         type_counts = {}
+        extension_history = []
         
         for chrom in chroms:
             if chrom in self.centromere_data:
@@ -1020,6 +1386,14 @@ class CentromereVisualizer:
             if chrom in self.optimized_centromeres:
                 for optimized in self.optimized_centromeres[chrom]:
                     optimized_centromeres.append(optimized['optimized_length'] / 1e6)
+                    # Collect dynamic extension info
+                    if 'dynamic_extension_info' in optimized:
+                        ext_info = optimized['dynamic_extension_info']
+                        extension_history.append({
+                            'chrom': chrom,
+                            'final_extension': ext_info['final_extension'],
+                            'iterations': ext_info['iterations']
+                        })
             
             if chrom in self.compare_centromeres:
                 for compare_cent in self.compare_centromeres[chrom]:
@@ -1041,27 +1415,27 @@ class CentromereVisualizer:
         
         if candidate_centromeres:
             stats_text.append(f"Candidate Regions: {len(candidate_centromeres)}")
-            if candidate_centromeres:
-                stats_text.append(f"Candidate Size Range: {min(candidate_centromeres):.2f}-{max(candidate_centromeres):.2f} Mb")
         
         if optimized_centromeres:
             stats_text.extend([
                 f"Optimized Centromeres: {len(optimized_centromeres)}",
-                f"Optimized Mean Size: {np.mean(optimized_centromeres):.2f} ± {np.std(optimized_centromeres):.2f} Mb",
-                f"Optimized Size Range: {min(optimized_centromeres):.2f}-{max(optimized_centromeres):.2f} Mb"
+                f"Optimized Mean Size: {np.mean(optimized_centromeres):.2f} ± {np.std(optimized_centromeres):.2f} Mb"
             ])
+            
+            if self.optimizer.dynamic_extension and extension_history:
+                avg_extension = np.mean([e['final_extension'] for e in extension_history]) / 1000
+                avg_iterations = np.mean([e['iterations'] for e in extension_history])
+                stats_text.extend([
+                    f"Dynamic Extension: Enabled",
+                    f"Avg Extension: {avg_extension:.1f} kb",
+                    f"Avg Iterations: {avg_iterations:.1f}"
+                ])
         
         if compare_centromeres:
             stats_text.extend([
                 f"Published Centromeres: {len(compare_centromeres)}",
-                f"Published Mean Size: {np.mean(compare_centromeres):.2f} ± {np.std(compare_centromeres):.2f} Mb",
-                f"Published Size Range: {min(compare_centromeres):.2f}-{max(compare_centromeres):.2f} Mb"
+                f"Published Mean Size: {np.mean(compare_centromeres):.2f} ± {np.std(compare_centromeres):.2f} Mb"
             ])
-        
-        if type_counts and self.known_centromeres:
-            stats_text.append(f"Centromere Types:")
-            for ctype, count in type_counts.items():
-                stats_text.append(f"  {ctype.capitalize()}: {count}")
         
         ax_stats.text(0.02, 0.5, '\n'.join(stats_text), 
                      transform=ax_stats.transAxes, va='top', ha='left',
@@ -1107,9 +1481,11 @@ class CentromereVisualizer:
         chrom_data = self.chrom_data[chrom]
         chrom_length_mb = chrom_data['length'] / 1e6
         
+        # Adjust figure height based on whether we have optimization data
         if chrom in self.optimized_centromeres:
-            fig = plt.figure(figsize=(14, 16), constrained_layout=True)
-            gs = gridspec.GridSpec(12, 1, height_ratios=[0.8, 0.15, 1, 0.3, 1, 0.3, 1, 0.3, 1, 0.3, 1.5, 0.5], figure=fig)
+            # Increased height for sampling distribution and dynamic extension visualization
+            fig = plt.figure(figsize=(14, 20), constrained_layout=True)
+            gs = gridspec.GridSpec(15, 1, height_ratios=[0.8, 0.15, 1, 0.3, 1, 0.3, 1, 0.3, 1, 0.3, 1.5, 1.0, 0.8, 0.5, 0.5], figure=fig)
         else:
             fig = plt.figure(figsize=(14, 14), constrained_layout=True)
             gs = gridspec.GridSpec(10, 1, height_ratios=[0.8, 0.15, 1, 0.3, 1, 0.3, 1, 0.3, 1, 0.3], figure=fig)
@@ -1146,8 +1522,12 @@ class CentromereVisualizer:
         
         if chrom in self.optimized_centromeres:
             ax_optimization = plt.subplot(gs[10])
-            ax_optimization_legend = plt.subplot(gs[11])
-            self._create_enhanced_optimization_panel(ax_optimization, ax_optimization_legend, chrom, chrom_length_mb)
+            ax_sampling = plt.subplot(gs[11])
+            ax_dynamic_extension = plt.subplot(gs[12])  # New panel for dynamic extension visualization
+            ax_optimization_legend = plt.subplot(gs[13])
+            ax_dynamic_legend = plt.subplot(gs[14])
+            self._create_enhanced_optimization_panel(ax_optimization, ax_sampling, ax_dynamic_extension, 
+                                                   ax_optimization_legend, ax_dynamic_legend, chrom, chrom_length_mb)
         
         for ax in [ax_kmer_line, ax_kmer_heat, ax_gc_line, ax_gc_heat, 
                   ax_cpg_line, ax_cpg_heat, ax_feature_line, ax_feature_heat]:
@@ -1158,8 +1538,8 @@ class CentromereVisualizer:
                    facecolor='white', edgecolor='none')
         plt.close()
 
-    def _create_enhanced_optimization_panel(self, ax, ax_legend, chrom, chrom_length_mb):
-        """Create optimization visualization panel"""
+    def _create_enhanced_optimization_panel(self, ax, ax_sampling, ax_dynamic, ax_legend, ax_dynamic_legend, chrom, chrom_length_mb):
+        """Create optimization visualization panel with sampling distribution and dynamic extension visualization"""
         if chrom not in self.optimized_centromeres:
             return
         
@@ -1186,32 +1566,25 @@ class CentromereVisualizer:
         focus_composite = composite_scores[focus_mask]
         focus_smoothed = composite_smoothed[focus_mask]
         
+        # Main optimization panel
         ax.plot(focus_positions, focus_composite, color=self.colors['distribution_raw'], 
-               label='Composite Score (raw)', linewidth=1.5, alpha=0.7)
+               label='Composite Score', linewidth=1.5, alpha=0.7)
         ax.plot(focus_positions, focus_smoothed, color=self.colors['distribution_smoothed'], 
-               label='Composite Score (smoothed)', linewidth=2.5, alpha=0.9)
+               label='Smoothed Score', linewidth=2.5, alpha=0.9)
         
         if 'peaks' in optimized_data and optimized_data['peaks']:
             peak_positions = positions_mb[optimized_data['peaks']]
             peak_values = composite_smoothed[optimized_data['peaks']]
             ax.scatter(peak_positions, peak_values, color='red', s=50, zorder=5,
-                     label=f'Detected Peaks ({len(peak_positions)})')
+                     label=f'Peaks ({len(peak_positions)})')
         
         threshold_info = optimized_data.get('threshold_info', {})
         if 'threshold_levels' in threshold_info:
             colors = ['#FF0000', '#FF6600', '#FFCC00', '#00CC00']
             for i, (level_name, threshold_value) in enumerate(threshold_info['threshold_levels'].items()):
-                ax.axhline(y=threshold_value, color=colors[i], linestyle='--', 
-                          alpha=0.7, linewidth=1.5, label=f'{level_name} threshold')
-        
-        if 'all_boundaries' in threshold_info:
-            for boundary_data in threshold_info['all_boundaries']:
-                color = self.colors.get(boundary_data['threshold_level'], 'gray')
-                for boundaries in boundary_data['boundaries']:
-                    left_mb = boundaries[0] / 1e6
-                    right_mb = boundaries[1] / 1e6
-                    ax.axvspan(left_mb, right_mb, alpha=0.1, color=color,
-                              label=f'{boundary_data["threshold_level"]} region')
+                if level_name == 'very_aggressive(select)':  # Only show selected threshold
+                    ax.axhline(y=threshold_value, color=colors[i], linestyle='--', 
+                              alpha=0.7, linewidth=1.5, label=f'Threshold')
         
         ax.axvspan(search_start_mb, search_end_mb, alpha=0.1, color=self.colors['search_region'],
                   label='Search Region')
@@ -1277,6 +1650,151 @@ class CentromereVisualizer:
                va='top', ha='left', fontsize=8,
                bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
         
+        # Sampling distribution panel
+        if 'sampling_distribution_stats' in threshold_info:
+            sampling_stats = threshold_info['sampling_distribution_stats']
+            sample_means = sampling_stats.get('sample_means', [])
+            
+            if sample_means and len(sample_means) > 0:
+                # Plot sampling distribution histogram
+                n, bins, patches = ax_sampling.hist(sample_means, bins=50, alpha=0.7, 
+                                                   color=self.colors['sampling_distribution'],
+                                                   density=True, edgecolor='black', linewidth=0.5)
+                
+                # Plot fitted normal distribution curve
+                xmin, xmax = ax_sampling.get_xlim()
+                x = np.linspace(xmin, xmax, 100)
+                
+                # Ensure sampling_mean and sampling_std values exist
+                sampling_mean = threshold_info.get('sampling_mean', 0.5)
+                sampling_std = threshold_info.get('sampling_std', 0.1)
+                
+                p = norm.pdf(x, sampling_mean, sampling_std)
+                ax_sampling.plot(x, p, 'k', linewidth=2, 
+                               label=f'Normal fit (μ={sampling_mean:.3f}, σ={sampling_std:.3f})')
+                
+                # Mark threshold line
+                if 'threshold_levels' in threshold_info:
+                    for i, (level_name, threshold_value) in enumerate(threshold_info['threshold_levels'].items()):
+                        if level_name == 'very_aggressive(select)':  # Only show selected threshold
+                            ax_sampling.axvline(x=threshold_value, color='#FF0000', 
+                                              linestyle='--', alpha=0.7, linewidth=1.5,
+                                              label=f'Threshold')
+                
+                ax_sampling.set_xlabel('Sample Mean Value', fontweight='bold')
+                ax_sampling.set_ylabel('Density', fontweight='bold')
+                ax_sampling.set_title('Sampling Distribution of Means', 
+                                    fontweight='bold', fontsize=12)
+                ax_sampling.grid(True, alpha=0.3)
+                ax_sampling.legend(fontsize=8)
+                
+                # Add sampling statistics
+                sampling_info = [
+                    "SAMPLING STATISTICS:",
+                    f"Sample size: {threshold_info.get('sample_size', 'N/A')}",
+                    f"Sampling iterations: {threshold_info.get('sampling_times', 'N/A')}",
+                    f"Mean: {sampling_mean:.4f}",
+                    f"Std: {sampling_std:.4f}",
+                    f"Distribution: {'Normal' if sampling_stats.get('is_normal', True) else 'Non-normal'}"
+                ]
+                
+                ax_sampling.text(0.02, 0.98, '\n'.join(sampling_info), transform=ax_sampling.transAxes,
+                               va='top', ha='left', fontsize=8,
+                               bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+            else:
+                # Show message if no sampling data
+                ax_sampling.text(0.5, 0.5, 'No sampling data available', 
+                               transform=ax_sampling.transAxes, ha='center', va='center', fontsize=12)
+                ax_sampling.set_xticks([])
+                ax_sampling.set_yticks([])
+        else:
+            # Show message if no sampling distribution statistics
+            ax_sampling.text(0.5, 0.5, 'No sampling distribution statistics available', 
+                           transform=ax_sampling.transAxes, ha='center', va='center', fontsize=12)
+            ax_sampling.set_xticks([])
+            ax_sampling.set_yticks([])
+        
+        # Dynamic extension visualization panel
+        if 'dynamic_extension_info' in optimized_data:
+            dynamic_info = optimized_data['dynamic_extension_info']
+            mean_history = dynamic_info.get('mean_history', [])
+            
+            if mean_history:
+                iterations = [m['iteration'] for m in mean_history]
+                extensions = [m['extension'] / 1000 for m in mean_history]  # Convert to kb
+                means = [m['mean'] for m in mean_history]
+                mean_diffs = [m.get('mean_diff', abs(m['mean'] - self.optimizer.target_mean)) for m in mean_history]
+                
+                # Create twin axes for extension and mean
+                ax_ext = ax_dynamic
+                ax_mean = ax_dynamic.twinx()
+                
+                # Plot extension history
+                ext_line = ax_ext.plot(iterations, extensions, 'o-', 
+                                     color=self.colors['dynamic_extension'], 
+                                     linewidth=2, markersize=6, 
+                                     label='Extension (kb)')
+                
+                # Plot mean history
+                mean_line = ax_mean.plot(iterations, means, 's-', 
+                                       color=self.colors['sampling_distribution'],
+                                       linewidth=2, markersize=4,
+                                       label='Region Mean')
+                
+                # Add target mean range
+                ax_mean.axhspan(self.optimizer.target_mean - self.optimizer.mean_tolerance,
+                              self.optimizer.target_mean + self.optimizer.mean_tolerance,
+                              alpha=0.2, color='green', label='Target Range')
+                
+                ax_mean.axhline(y=self.optimizer.target_mean, color='green', 
+                              linestyle='--', alpha=0.7, linewidth=1,
+                              label='Target Mean')
+                
+                ax_ext.set_xlabel('Iteration', fontweight='bold')
+                ax_ext.set_ylabel('Extension (kb)', fontweight='bold', 
+                                color=self.colors['dynamic_extension'])
+                ax_mean.set_ylabel('Region Mean', fontweight='bold',
+                                 color=self.colors['sampling_distribution'])
+                
+                ax_ext.tick_params(axis='y', labelcolor=self.colors['dynamic_extension'])
+                ax_mean.tick_params(axis='y', labelcolor=self.colors['sampling_distribution'])
+                
+                ax_dynamic.set_title('Dynamic Extension Optimization', 
+                                   fontweight='bold', fontsize=12)
+                ax_dynamic.grid(True, alpha=0.3)
+                
+                # Combine legends
+                lines = ext_line + mean_line
+                labels = [l.get_label() for l in lines]
+                ax_dynamic.legend(lines, labels, loc='upper right', fontsize=8)
+                
+                # Add convergence info
+                final_mean_diff = mean_diffs[-1] if mean_diffs else 0
+                conv_info = [
+                    "DYNAMIC EXTENSION:",
+                    f"Final extension: {dynamic_info['final_extension']/1000:.1f} kb",
+                    f"Total iterations: {dynamic_info['iterations']}",
+                    f"Final mean: {means[-1]:.3f}",
+                    f"Final mean diff: {final_mean_diff:.3f}",
+                    f"Target mean: {self.optimizer.target_mean} ± {self.optimizer.mean_tolerance}"
+                ]
+                
+                ax_dynamic.text(0.02, 0.98, '\n'.join(conv_info), 
+                              transform=ax_dynamic.transAxes,
+                              va='top', ha='left', fontsize=8,
+                              bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+            else:
+                ax_dynamic.text(0.5, 0.5, 'No dynamic extension data available', 
+                              transform=ax_dynamic.transAxes, ha='center', va='center', fontsize=12)
+                ax_dynamic.set_xticks([])
+                ax_dynamic.set_yticks([])
+        else:
+            ax_dynamic.text(0.5, 0.5, 'Dynamic extension not enabled', 
+                          transform=ax_dynamic.transAxes, ha='center', va='center', fontsize=12)
+            ax_dynamic.set_xticks([])
+            ax_dynamic.set_yticks([])
+        
+        # Legend panel for optimization parameters
         ax_legend.set_xlim(0, 1)
         ax_legend.set_ylim(0, 1)
         ax_legend.set_xticks([])
@@ -1285,13 +1803,12 @@ class CentromereVisualizer:
             spine.set_visible(False)
         
         legend_text = [
-            "EASYCEN OPTIMIZATION PARAMETERS:",
+            "OPTIMIZATION PARAMETERS:",
             f"K-mer weight: {self.optimizer.kmer_weight}",
             f"Feature weight: {self.optimizer.feature_weight}", 
-            f"Search extension: {self.optimizer.extension_bp/1000:.0f} kb",
+            f"Initial extension: {self.optimizer.extension_bp/1000:.0f} kb",
             f"Smoothing sigma: {self.optimizer.smoothing_sigma}",
             f"Base threshold: {self.optimizer.distribution_threshold}",
-            f"Peak prominence: {self.optimizer.peak_prominence}",
             f"Min region size: {self.optimizer.min_region_size/1000:.0f} kb",
             f"Random sampling: {self.optimizer.random_sampling_times} times"
         ]
@@ -1299,6 +1816,30 @@ class CentromereVisualizer:
         ax_legend.text(0.02, 0.5, '\n'.join(legend_text), transform=ax_legend.transAxes,
                       va='center', ha='left', fontfamily='monospace', fontsize=9,
                       bbox=dict(boxstyle="round,pad=0.5", facecolor=self.colors['background']))
+        
+        # Dynamic extension parameters panel
+        ax_dynamic_legend.set_xlim(0, 1)
+        ax_dynamic_legend.set_ylim(0, 1)
+        ax_dynamic_legend.set_xticks([])
+        ax_dynamic_legend.set_yticks([])
+        for spine in ax_dynamic_legend.spines.values():
+            spine.set_visible(False)
+        
+        if self.optimizer.dynamic_extension:
+            dynamic_legend_text = [
+                "DYNAMIC EXTENSION PARAMETERS:",
+                f"Enabled: {self.optimizer.dynamic_extension}",
+                f"Target mean: {self.optimizer.target_mean}",
+                f"Mean tolerance: {self.optimizer.mean_tolerance}",
+                f"Max extension factor: {self.optimizer.max_extension_factor}",
+                f"Extension increment: {self.optimizer.extension_increment/1000:.0f} kb",
+                f"Max iterations: 50"
+            ]
+            
+            ax_dynamic_legend.text(0.02, 0.5, '\n'.join(dynamic_legend_text), 
+                                 transform=ax_dynamic_legend.transAxes,
+                                 va='center', ha='left', fontfamily='monospace', fontsize=9,
+                                 bbox=dict(boxstyle="round,pad=0.5", facecolor=self.colors['background']))
 
     def _create_centromere_marker_track(self, ax, chrom):
         """Create centromere marker track for chromosome plot"""
@@ -1321,6 +1862,8 @@ class CentromereVisualizer:
         track_title = 'Centromere Regions'
         if self.optimized_centromeres:
             track_title += ' (with Boundary Optimization)'
+            if self.optimizer.dynamic_extension:
+                track_title += ' [Dynamic Extension]'
         elif not self.known_centromeres:
             track_title += ' (Analysis Results)'
         ax.text(0.01, 0.5, track_title, transform=ax.transAxes, 
@@ -1518,7 +2061,7 @@ class CentromereVisualizer:
         ax.set_ylim(0, 1)
         ax.set_xlim(0, chrom_length)
         
-        if ax.get_subplotspec().rowspan.stop == (10 if not self.optimized_centromeres else 12):
+        if ax.get_subplotspec().rowspan.stop == (10 if not self.optimized_centromeres else 15):
             cbar = plt.colorbar(im, ax=ax, orientation='horizontal', pad=0.1, shrink=0.8)
             cbar.set_label('Value Intensity', fontsize=9, fontweight='bold')
             cbar.ax.tick_params(labelsize=8)
@@ -1569,8 +2112,6 @@ class CentromereVisualizer:
             
             if candidate_centromeres:
                 chrom_info.append(f"Candidate Regions: {len(candidate_centromeres)}")
-                for i, candidate in enumerate(candidate_centromeres[:3]):
-                    chrom_info.append(f"  Candidate {i+1}: {candidate['start_mb']:.2f}-{candidate['end_mb']:.2f} Mb")
         
         if chrom in self.optimized_centromeres:
             optimized = self.optimized_centromeres[chrom][0]
@@ -1583,23 +2124,27 @@ class CentromereVisualizer:
             
             chrom_info.extend([
                 "",
-                "EASYCEN BOUNDARY OPTIMIZATION:",
+                "BOUNDARY OPTIMIZATION:",
                 f"Known: {optimized['start_mb']:.2f}-{optimized['end_mb']:.2f} Mb",
                 f"Optimized: {optimized['optimized_start_mb']:.2f}-{optimized['optimized_end_mb']:.2f} Mb",
-                size_change_text,
-                f"Parameters: kmer={self.optimizer.kmer_weight}, feature={self.optimizer.feature_weight}",
-                f"Base threshold: {self.optimizer.distribution_threshold}",
-                f"Random sampling: {self.optimizer.random_sampling_times} times"
+                size_change_text
             ])
+            
+            if 'dynamic_extension_info' in optimized:
+                dyn_info = optimized['dynamic_extension_info']
+                chrom_info.extend([
+                    f"Dynamic Extension: {dyn_info['final_extension']/1000:.1f} kb",
+                    f"Iterations: {dyn_info['iterations']}",
+                    f"Final mean diff: {dyn_info.get('best_mean_diff', 0):.3f}"
+                ])
         
         if chrom in self.compare_centromeres:
             chrom_info.extend([
                 "",
-                "PUBLISHED CENTROMERE COMPARISON:"
+                "PUBLISHED COMPARISON:"
             ])
             for i, compare_cent in enumerate(self.compare_centromeres[chrom]):
                 chrom_info.append(f"  Published {i+1}: {compare_cent['start_mb']:.2f}-{compare_cent['end_mb']:.2f} Mb")
-                chrom_info.append(f"    Size: {compare_cent['length']/1e6:.2f} Mb")
         
         bbox = FancyBboxPatch((0.02, 0.05), 0.96, 0.9,
                              boxstyle="round,pad=0.1",
@@ -1617,6 +2162,8 @@ class CentromereVisualizer:
         title_text = f'EasyCen - Chromosome {chrom} Genomic Feature Analysis'
         if self.optimized_centromeres:
             title_text += ' (with Boundary Optimization)'
+            if self.optimizer.dynamic_extension:
+                title_text += ' [Dynamic Extension]'
         elif not self.known_centromeres:
             title_text += ' (Analysis Results)'
         ax.text(0.5, 0.95, title_text,
@@ -1662,8 +2209,19 @@ class CentromereVisualizer:
                             'Optimized_End_Mb': optimized['optimized_end_mb'],
                             'Optimized_Size_Mb': optimized['optimized_length'] / 1e6,
                             'Size_Change_Percent': size_change_percent,
-                            'Optimization_Method': optimized.get('optimization_method', 'unknown')
+                            'Optimization_Method': optimized.get('optimization_method', 'unknown'),
+                            'Sampling_Normality_P_Value': optimized.get('threshold_info', {}).get('sampling_distribution_stats', {}).get('normality_p_value', 1.0),
+                            'Sampling_Is_Normal': optimized.get('threshold_info', {}).get('sampling_distribution_stats', {}).get('is_normal', True)
                         })
+                        
+                        if 'dynamic_extension_info' in optimized:
+                            dyn_info = optimized['dynamic_extension_info']
+                            stat_entry.update({
+                                'Dynamic_Extension_Enabled': self.optimizer.dynamic_extension,
+                                'Final_Extension_kb': dyn_info['final_extension'] / 1000,
+                                'Extension_Iterations': dyn_info['iterations'],
+                                'Best_Mean_Diff': dyn_info.get('best_mean_diff', 0)
+                            })
                     
                     if chrom in self.compare_centromeres:
                         for i, compare_cent in enumerate(self.compare_centromeres[chrom]):
@@ -1679,79 +2237,123 @@ class CentromereVisualizer:
         
         df = pd.DataFrame(stats_data)
         
-        if self.optimized_centromeres or self.compare_centromeres:
-            fig, axes = plt.subplots(2, 3, figsize=(18, 12), constrained_layout=True)
+        # Determine subplot layout based on available data
+        n_plots = 2  # Base plots: size distribution and position vs size
+        
+        if self.optimized_centromeres:
+            n_plots += 2  # Add size change and original vs optimized
+        
+        if self.compare_centromeres:
+            n_plots += 1  # Add comparison plot
+        
+        if self.optimizer.dynamic_extension and 'Final_Extension_kb' in df.columns:
+            n_plots += 1  # Add dynamic extension plot
+        
+        n_cols = 3
+        n_rows = (n_plots + n_cols - 1) // n_cols
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 5*n_rows), constrained_layout=True)
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([axes])
+        elif n_rows == 1 or n_cols == 1:
+            axes = axes.reshape(-1)
         else:
-            fig, axes = plt.subplots(2, 2, figsize=(14, 12), constrained_layout=True)
+            axes = axes.flatten()
             
         fig.suptitle('EasyCen Centromere Statistical Analysis' + 
                     (' (with Boundary Optimization)' if self.optimized_centromeres else 
-                     ' (Analysis Results)' if not self.known_centromeres else ''),
+                     ' (Analysis Results)' if not self.known_centromeres else '') +
+                    (' [Dynamic Extension]' if self.optimizer.dynamic_extension else ''),
                     fontsize=18, fontweight='bold', y=0.95)
         
+        plot_idx = 0
+        
+        # Plot 1: Centromere Size Distribution
         if len(df) > 0:
             if self.known_centromeres:
                 colors = [self.colors.get(ctype, self.colors['unknown']) for ctype in df['Type']]
             else:
                 colors = [self.colors['analysis_primary'] for _ in range(len(df))]
                 
-            axes[0,0].scatter(df['Centromere_Size_Mb'], range(len(df)), 
+            axes[plot_idx].scatter(df['Centromere_Size_Mb'], range(len(df)), 
                              s=60, alpha=0.7, c=colors)
-            axes[0,0].set_xlabel('Centromere Size (Mb)', fontweight='bold')
-            axes[0,0].set_ylabel('Chromosome Index', fontweight='bold')
-            axes[0,0].set_title('Centromere Size Distribution', fontweight='bold', fontsize=14)
-            axes[0,0].grid(True, alpha=0.3)
+            axes[plot_idx].set_xlabel('Centromere Size (Mb)', fontweight='bold')
+            axes[plot_idx].set_ylabel('Chromosome Index', fontweight='bold')
+            axes[plot_idx].set_title('Centromere Size Distribution', fontweight='bold', fontsize=14)
+            axes[plot_idx].grid(True, alpha=0.3)
+            plot_idx += 1
         
+        # Plot 2: Centromere Position vs Chromosome Size
         if len(df) > 0:
             if self.known_centromeres:
                 colors = [self.colors.get(ctype, self.colors['unknown']) for ctype in df['Type']]
             else:
                 colors = [self.colors['analysis_primary'] for _ in range(len(df))]
                 
-            axes[0,1].scatter(df['Length_Mb'], df['Relative_Position'], 
+            axes[plot_idx].scatter(df['Length_Mb'], df['Relative_Position'], 
                              s=60, alpha=0.7, c=colors)
-            axes[0,1].set_xlabel('Chromosome Length (Mb)', fontweight='bold')
-            axes[0,1].set_ylabel('Relative Centromere Position', fontweight='bold')
-            axes[0,1].set_title('Centromere Position vs Chromosome Size', fontweight='bold', fontsize=14)
-            axes[0,1].grid(True, alpha=0.3)
+            axes[plot_idx].set_xlabel('Chromosome Length (Mb)', fontweight='bold')
+            axes[plot_idx].set_ylabel('Relative Centromere Position', fontweight='bold')
+            axes[plot_idx].set_title('Centromere Position vs Chromosome Size', fontweight='bold', fontsize=14)
+            axes[plot_idx].grid(True, alpha=0.3)
+            plot_idx += 1
         
+        # Plot 3: Chromosome Size vs Centromere Size
         if len(df) > 0:
             if self.known_centromeres:
                 colors = [self.colors.get(ctype, self.colors['unknown']) for ctype in df['Type']]
             else:
                 colors = [self.colors['analysis_primary'] for _ in range(len(df))]
                 
-            axes[1,0].scatter(df['Length_Mb'], df['Centromere_Size_Mb'], 
+            axes[plot_idx].scatter(df['Length_Mb'], df['Centromere_Size_Mb'], 
                              s=60, alpha=0.7, c=colors)
-            axes[1,0].set_xlabel('Chromosome Length (Mb)', fontweight='bold')
-            axes[1,0].set_ylabel('Centromere Size (Mb)', fontweight='bold')
-            axes[1,0].set_title('Chromosome Size vs Centromere Size', fontweight='bold', fontsize=14)
-            axes[1,0].grid(True, alpha=0.3)
+            axes[plot_idx].set_xlabel('Chromosome Length (Mb)', fontweight='bold')
+            axes[plot_idx].set_ylabel('Centromere Size (Mb)', fontweight='bold')
+            axes[plot_idx].set_title('Chromosome Size vs Centromere Size', fontweight='bold', fontsize=14)
+            axes[plot_idx].grid(True, alpha=0.3)
+            plot_idx += 1
         
-        plot_idx = 1
+        # Additional plots for optimized centromeres
         if self.optimized_centromeres and 'Optimized_Size_Mb' in df.columns:
-            axes[0,2].hist(df['Size_Change_Percent'], bins=15, alpha=0.7, 
+            # Size Change Histogram
+            axes[plot_idx].hist(df['Size_Change_Percent'], bins=15, alpha=0.7, 
                           color=self.colors['optimized_centromere'], edgecolor='black')
-            axes[0,2].set_xlabel('Size Change (%)', fontweight='bold')
-            axes[0,2].set_ylabel('Frequency', fontweight='bold')
-            axes[0,2].set_title('Centromere Size Change After Optimization', fontweight='bold', fontsize=14)
-            axes[0,2].grid(True, alpha=0.3)
-            axes[0,2].axvline(0, color='red', linestyle='--', alpha=0.7)
+            axes[plot_idx].set_xlabel('Size Change (%)', fontweight='bold')
+            axes[plot_idx].set_ylabel('Frequency', fontweight='bold')
+            axes[plot_idx].set_title('Centromere Size Change After Optimization', fontweight='bold', fontsize=14)
+            axes[plot_idx].grid(True, alpha=0.3)
+            axes[plot_idx].axvline(0, color='red', linestyle='--', alpha=0.7)
             plot_idx += 1
             
+            # Original vs Optimized Sizes
             x = range(len(df))
             width = 0.35
-            axes[1,1].bar([i - width/2 for i in x], df['Centromere_Size_Mb'], width, 
+            axes[plot_idx].bar([i - width/2 for i in x], df['Centromere_Size_Mb'], width, 
                          label='Original', alpha=0.7, color=self.colors['known_centromere'])
-            axes[1,1].bar([i + width/2 for i in x], df['Optimized_Size_Mb'], width, 
+            axes[plot_idx].bar([i + width/2 for i in x], df['Optimized_Size_Mb'], width, 
                          label='Optimized', alpha=0.7, color=self.colors['optimized_centromere'])
-            axes[1,1].set_xlabel('Chromosome Index', fontweight='bold')
-            axes[1,1].set_ylabel('Centromere Size (Mb)', fontweight='bold')
-            axes[1,1].set_title('Original vs Optimized Centromere Sizes', fontweight='bold', fontsize=14)
-            axes[1,1].legend()
-            axes[1,1].grid(True, alpha=0.3)
+            axes[plot_idx].set_xlabel('Chromosome Index', fontweight='bold')
+            axes[plot_idx].set_ylabel('Centromere Size (Mb)', fontweight='bold')
+            axes[plot_idx].set_title('Original vs Optimized Centromere Sizes', fontweight='bold', fontsize=14)
+            axes[plot_idx].legend()
+            axes[plot_idx].grid(True, alpha=0.3)
             plot_idx += 1
         
+        # Dynamic Extension Visualization
+        if self.optimizer.dynamic_extension and 'Final_Extension_kb' in df.columns:
+            axes[plot_idx].scatter(df['Final_Extension_kb'], df['Size_Change_Percent'] if 'Size_Change_Percent' in df.columns else df['Centromere_Size_Mb'],
+                             s=60, alpha=0.7, c=self.colors['dynamic_extension'])
+            axes[plot_idx].set_xlabel('Final Extension (kb)', fontweight='bold')
+            if 'Size_Change_Percent' in df.columns:
+                axes[plot_idx].set_ylabel('Size Change (%)', fontweight='bold')
+                axes[plot_idx].set_title('Dynamic Extension vs Size Change', fontweight='bold', fontsize=14)
+            else:
+                axes[plot_idx].set_ylabel('Centromere Size (Mb)', fontweight='bold')
+                axes[plot_idx].set_title('Dynamic Extension vs Centromere Size', fontweight='bold', fontsize=14)
+            axes[plot_idx].grid(True, alpha=0.3)
+            plot_idx += 1
+        
+        # Comparison with published centromeres
         if self.compare_centromeres:
             published_cols = [col for col in df.columns if col.startswith('Published_') and col.endswith('_Size_Mb')]
             if published_cols:
@@ -1760,17 +2362,23 @@ class CentromereVisualizer:
                     published_sizes.extend(df[col].dropna().tolist())
                 
                 if published_sizes:
-                    axes[1,2].hist([df['Centromere_Size_Mb'], published_sizes], 
+                    axes[plot_idx].hist([df['Centromere_Size_Mb'], published_sizes], 
                                   bins=15, alpha=0.7, 
                                   label=['EasyCen', 'Published'],
                                   color=[self.colors['analysis_primary'], self.colors['compare_centromere']],
                                   edgecolor='black')
-                    axes[1,2].set_xlabel('Centromere Size (Mb)', fontweight='bold')
-                    axes[1,2].set_ylabel('Frequency', fontweight='bold')
-                    axes[1,2].set_title('Size Distribution: EasyCen vs Published', fontweight='bold', fontsize=14)
-                    axes[1,2].legend()
-                    axes[1,2].grid(True, alpha=0.3)
+                    axes[plot_idx].set_xlabel('Centromere Size (Mb)', fontweight='bold')
+                    axes[plot_idx].set_ylabel('Frequency', fontweight='bold')
+                    axes[plot_idx].set_title('Size Distribution: EasyCen vs Published', fontweight='bold', fontsize=14)
+                    axes[plot_idx].legend()
+                    axes[plot_idx].grid(True, alpha=0.3)
+                    plot_idx += 1
         
+        # Hide unused subplots
+        for i in range(plot_idx, len(axes)):
+            axes[i].set_visible(False)
+        
+        # Statistics text
         stats_text = [
             f"Total Chromosomes: {len(df)}",
             f"Mean Centromere Size: {df['Centromere_Size_Mb'].mean():.2f} ± {df['Centromere_Size_Mb'].std():.2f} Mb",
@@ -1780,14 +2388,15 @@ class CentromereVisualizer:
         if self.optimized_centromeres and 'Optimized_Size_Mb' in df.columns:
             stats_text.extend([
                 f"Mean Optimized Size: {df['Optimized_Size_Mb'].mean():.2f} ± {df['Optimized_Size_Mb'].std():.2f} Mb",
-                f"Mean Size Change: {df['Size_Change_Percent'].mean():.1f}% ± {df['Size_Change_Percent'].std():.1f}%",
-                f"Optimization Parameters:",
-                f"  kmer_weight={self.optimizer.kmer_weight}",
-                f"  feature_weight={self.optimizer.feature_weight}",
-                f"  smoothing_sigma={self.optimizer.smoothing_sigma}",
-                f"  distribution_threshold={self.optimizer.distribution_threshold}",
-                f"  random_sampling_times={self.optimizer.random_sampling_times}"
+                f"Mean Size Change: {df['Size_Change_Percent'].mean():.1f}% ± {df['Size_Change_Percent'].std():.1f}%"
             ])
+            
+            if self.optimizer.dynamic_extension and 'Final_Extension_kb' in df.columns:
+                stats_text.extend([
+                    f"Mean Final Extension: {df['Final_Extension_kb'].mean():.1f} ± {df['Final_Extension_kb'].std():.1f} kb",
+                    f"Mean Iterations: {df['Extension_Iterations'].mean():.1f} ± {df['Extension_Iterations'].std():.1f}",
+                    f"Mean Best Mean Diff: {df['Best_Mean_Diff'].mean():.3f} ± {df['Best_Mean_Diff'].std():.3f}"
+                ])
         
         if self.compare_centromeres:
             published_cols = [col for col in df.columns if col.startswith('Published_') and col.endswith('_Size_Mb')]
@@ -1799,8 +2408,7 @@ class CentromereVisualizer:
                 if published_sizes:
                     stats_text.extend([
                         f"Published Centromeres: {len(published_sizes)}",
-                        f"Mean Published Size: {np.mean(published_sizes):.2f} ± {np.std(published_sizes):.2f} Mb",
-                        f"Published Size Range: {min(published_sizes):.2f}-{max(published_sizes):.2f} Mb"
+                        f"Mean Published Size: {np.mean(published_sizes):.2f} ± {np.std(published_sizes):.2f} Mb"
                     ])
         
         if self.known_centromeres:
@@ -1824,9 +2432,14 @@ class CentromereVisualizer:
         print(f"Data table saved to: {csv_file}")
 
 def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
-                     kmer_weight=0.6, feature_weight=0.4, optimization_extension=500000,
+                     kmer_weight=0.4, feature_weight=0.6, optimization_extension=100000,  # Changed default to 100k
                      genome_overview=True, chromosome_details=True, statistics=True,
-                     heatmap_colormap='viridis', **kwargs):
+                     heatmap_colormap='viridis', heatmap_height=0.3,
+                     smoothing_sigma=2.0, distribution_threshold=0.05,
+                     random_sampling_times=100000, sample_size=None, compare_centromeres_file=None,
+                     peak_prominence=0.1, min_region_size=50000,
+                     dynamic_extension=True, target_mean=0.5, mean_tolerance=0.01,  # New parameters
+                     max_extension_factor=5.0, extension_increment=50000):
     """
     Main visualization function for EasyCen results
     
@@ -1836,11 +2449,24 @@ def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
         output_dir: Output directory for visualization results
         kmer_weight: Weight for k-mer density in optimization
         feature_weight: Weight for feature percentage in optimization
-        optimization_extension: Extension around centromeres for optimization
+        optimization_extension: Extension around centromeres for optimization (default: 100k)
         genome_overview: Generate genome overview plot
         chromosome_details: Generate detailed chromosome plots
         statistics: Generate statistical summary
         heatmap_colormap: Color map for heatmap tracks
+        heatmap_height: Relative height of heatmap compared to line plot
+        smoothing_sigma: Sigma parameter for Gaussian smoothing
+        distribution_threshold: Base threshold for boundary detection
+        random_sampling_times: Number of random samplings for distribution fitting
+        sample_size: Sample size for each random sampling
+        compare_centromeres_file: BED file with published centromere regions for comparison
+        peak_prominence: Minimum prominence for peak detection
+        min_region_size: Minimum size for candidate regions in bp
+        dynamic_extension: Enable dynamic extension to achieve target sampling mean
+        target_mean: Target sampling mean for dynamic extension (default: 0.5)
+        mean_tolerance: Tolerance for target mean (default: 0.1)
+        max_extension_factor: Maximum extension as multiple of initial extension
+        extension_increment: Increment for extension adjustment in bp
     """
     
     if output_dir is None:
@@ -1855,6 +2481,17 @@ def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
     print(f"Known centromeres: {known_centromeres_file}")
     print(f"Output directory: {output_dir}")
     print(f"Optimization weights: kmer={kmer_weight}, feature={feature_weight}")
+    print(f"Initial extension: {optimization_extension} bp")
+    print(f"Dynamic extension: {dynamic_extension}")
+    if dynamic_extension:
+        print(f"Target mean: {target_mean} ± {mean_tolerance}")
+        print(f"Max extension factor: {max_extension_factor}")
+        print(f"Extension increment: {extension_increment} bp")
+    print(f"Smoothing sigma: {smoothing_sigma}")
+    print(f"Distribution threshold: {distribution_threshold}")
+    print(f"Random sampling times: {random_sampling_times}")
+    print(f"Peak prominence: {peak_prominence}")
+    print(f"Min region size: {min_region_size}")
     print("=" * 60)
     
     visualizer = CentromereVisualizer(
@@ -1864,7 +2501,20 @@ def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
         feature_weight=feature_weight,
         optimization_extension=optimization_extension,
         heatmap_colormap=heatmap_colormap,
-        output_dir=output_dir
+        heatmap_height=heatmap_height,
+        output_dir=output_dir,
+        smoothing_sigma=smoothing_sigma,
+        distribution_threshold=distribution_threshold,
+        random_sampling_times=random_sampling_times,
+        sample_size=sample_size,
+        compare_centromeres_file=compare_centromeres_file,
+        peak_prominence=peak_prominence,
+        min_region_size=min_region_size,
+        dynamic_extension=dynamic_extension,
+        target_mean=target_mean,
+        mean_tolerance=mean_tolerance,
+        max_extension_factor=max_extension_factor,
+        extension_increment=extension_increment
     )
     
     visualizer.load_data()
@@ -1892,7 +2542,9 @@ def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
             print(f"Analysis results: {analysis_bed}")
     elif visualizer.optimized_centromeres:
         weight_suffix = f"_kmer{kmer_weight}_feature{feature_weight}"
-        optimized_bed = output_dir / f"optimized_centromeres{weight_suffix}.bed"
+        sampling_suffix = f"_samples{random_sampling_times}"
+        dynamic_suffix = "_dynamic" if dynamic_extension else "_fixed"
+        optimized_bed = output_dir / f"optimized_centromeres{weight_suffix}{sampling_suffix}{dynamic_suffix}.bed"
         if optimized_bed.exists():
             print(f"Optimized centromeres: {optimized_bed}")
     
@@ -1909,10 +2561,32 @@ def visualize_results(results_dir, known_centromeres_file=None, output_dir=None,
     if visualizer.optimized_centromeres:
         optimized_count = sum(len(regions) for regions in visualizer.optimized_centromeres.values())
         print(f"Optimized centromeres: {optimized_count}")
+        
+        if dynamic_extension:
+            # Calculate average extension statistics
+            total_extensions = []
+            total_iterations = []
+            best_mean_diffs = []
+            for chrom in visualizer.optimized_centromeres:
+                for optimized in visualizer.optimized_centromeres[chrom]:
+                    if 'dynamic_extension_info' in optimized:
+                        ext_info = optimized['dynamic_extension_info']
+                        total_extensions.append(ext_info['final_extension'])
+                        total_iterations.append(ext_info['iterations'])
+                        best_mean_diffs.append(ext_info.get('best_mean_diff', 0))
+            
+            if total_extensions:
+                avg_extension = np.mean(total_extensions) / 1000  # Convert to kb
+                avg_iterations = np.mean(total_iterations)
+                avg_mean_diff = np.mean(best_mean_diffs)
+                print(f"Average final extension: {avg_extension:.1f} kb")
+                print(f"Average iterations: {avg_iterations:.1f}")
+                print(f"Average best mean difference: {avg_mean_diff:.3f}")
+                print(f"Success rate: {sum(1 for d in best_mean_diffs if d <= mean_tolerance)}/{len(best_mean_diffs)} chromosomes within target range")
 
 def main():
     parser = argparse.ArgumentParser(
-        description="EasyCen Visualization - Centromere visualization with boundary optimization",
+        description="EasyCen Visualization - Centromere visualization with boundary optimization and statistical analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -1922,14 +2596,41 @@ def main():
                        help="BED file with known centromere regions")
     parser.add_argument("--compare", 
                        help="BED file with published centromere regions for comparison")
-    parser.add_argument("--kmer-weight", type=float, default=0.6,
-                       help="Weight for kmer density in optimization (default: 0.6)")
-    parser.add_argument("--feature-weight", type=float, default=0.4,
-                       help="Weight for feature percentage in optimization (default: 0.4)")
-    parser.add_argument("--optimization-extension", type=int, default=500000,
-                       help="Extension around known centromere for optimization search in bp (default: 500000)")
+    parser.add_argument("--kmer-weight", type=float, default=0.4,
+                       help="Weight for kmer density in optimization (default: 0.4)")
+    parser.add_argument("--feature-weight", type=float, default=0.6,
+                       help="Weight for feature percentage in optimization (default: 0.6)")
+    parser.add_argument("--optimization-extension", type=int, default=100000,
+                       help="Initial extension around known centromere for optimization search in bp (default: 100000)")
+    parser.add_argument("--smoothing-sigma", type=float, default=2.0,
+                       help="Sigma parameter for Gaussian smoothing of composite scores (default: 2.0)")
+    parser.add_argument("--distribution-threshold", type=float, default=0.05,
+                       help="Base threshold for boundary detection (default: 0.05)")
+    parser.add_argument("--random-sampling-times", type=int, default=100000,
+                       help="Number of random samplings for distribution fitting (default: 100000)")
+    parser.add_argument("--sample-size", type=int, default=None,
+                       help="Sample size for each random sampling (default: min(30, data_size//10))")
+    parser.add_argument("--peak-prominence", type=float, default=0.1,
+                       help="Minimum prominence for peak detection (default: 0.1)")
+    parser.add_argument("--min-region-size", type=int, default=50000,
+                       help="Minimum size for candidate regions in bp (default: 50000)")
+    
+    # New arguments for dynamic extension
+    parser.add_argument("--dynamic-extension", action="store_true", default=True,
+                       help="Enable dynamic extension to achieve target sampling mean (default: True)")
+    parser.add_argument("--no-dynamic-extension", action="store_false", dest="dynamic_extension",
+                       help="Disable dynamic extension")
+    parser.add_argument("--target-mean", type=float, default=0.5,
+                       help="Target sampling mean for dynamic extension (default: 0.5)")
+    parser.add_argument("--mean-tolerance", type=float, default=0.01,
+                       help="Tolerance for target mean in dynamic extension (default: 0.01)")
+    parser.add_argument("--max-extension-factor", type=float, default=5.0,
+                       help="Maximum extension as multiple of initial extension (default: 5.0)")
+    parser.add_argument("--extension-increment", type=int, default=50000,
+                       help="Increment for extension adjustment in bp (default: 50000)")
+    
     parser.add_argument("--output-dir", 
-                       help="Output directory for plots and BED files")
+                       help="Output directory for plots and BED files (default: results_dir/visualization)")
     parser.add_argument("--genome-overview", action="store_true", default=True,
                        help="Generate genome overview plot (default: True)")
     parser.add_argument("--chromosome-details", action="store_true", default=True,
@@ -1939,6 +2640,8 @@ def main():
     parser.add_argument("--heatmap-colormap", default="viridis",
                        choices=['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 'RdYlBu_r', 'Spectral_r'],
                        help="Color map for heatmap tracks (default: viridis)")
+    parser.add_argument("--heatmap-height", type=float, default=0.3,
+                       help="Relative height of heatmap compared to line plot (default: 0.3)")
     
     args = parser.parse_args()
 
@@ -1952,7 +2655,20 @@ def main():
         genome_overview=args.genome_overview,
         chromosome_details=args.chromosome_details,
         statistics=args.statistics,
-        heatmap_colormap=args.heatmap_colormap
+        heatmap_colormap=args.heatmap_colormap,
+        heatmap_height=args.heatmap_height,
+        smoothing_sigma=args.smoothing_sigma,
+        distribution_threshold=args.distribution_threshold,
+        random_sampling_times=args.random_sampling_times,
+        sample_size=args.sample_size,
+        compare_centromeres_file=args.compare,
+        peak_prominence=args.peak_prominence,
+        min_region_size=args.min_region_size,
+        dynamic_extension=args.dynamic_extension,
+        target_mean=args.target_mean,
+        mean_tolerance=args.mean_tolerance,
+        max_extension_factor=args.max_extension_factor,
+        extension_increment=args.extension_increment
     )
 
 if __name__ == "__main__":
