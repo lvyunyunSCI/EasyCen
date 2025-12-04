@@ -33,7 +33,7 @@ EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer
 - git clone https://github.com/lvyunyunSCI/EasyCen.git
 - source activate EasyCen_env
 - pip install -e .
-- 4GB+ RAM (8GB+ recommended for large genomes)
+- 16GB+ RAM (100GB+ recommended for large genomes)
 - Multi-core processor for parallel processing
 
 ### Quick Installation
@@ -64,7 +64,7 @@ easycen analyze --fasta genome.fa --output results
 ```
 
 # With custom k-mer length and window size
-easycen analyze --fasta genome.fa -k 21 --window 50000 --output custom_results
+easycen analyze --fasta genome.fa -k 21 --window 500000 --output custom_results
 ### Visualization
 ```bash
 # Visualize analysis results
@@ -293,6 +293,59 @@ Chromosome Details: Multi-track visualization with k-mer density, GC content, et
 Boundary Optimization: Composite score plots showing optimization process
 
 Statistical Summary: Size distributions, positional analysis, and comparisons
+
+# Examples
+Arabidopsis thaliana (Thale cress)
+```bash
+genome=chrs.fa
+abb=ninanjie_t2t
+model=plant
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --kmer-library ./EasyCENcore_${abb}_res/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 25000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time} "
+```
+Mouse
+```bash
+genome=mhaESC.t2t.fa
+abb=mouse_mhaESC
+model=animal
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 10000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --kmer-library ./EasyCENcore_${abb}_res/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 500000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time} "
+easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 --select_chroms CENChr12,CENChr15,CENChr16,CENChr19
+```
+
+
 
 
 
