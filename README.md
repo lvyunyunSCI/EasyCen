@@ -344,6 +344,9 @@ elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 --select_chroms CENChr12,CENChr15,CENChr16,CENChr19
 ```
+# Result
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results plot" width="600" height="1000"/>
+
 
 
 
