@@ -5,7 +5,7 @@ Triangular Hi-C contact map visualization from .mcool files
 
 Author: Yunyun Lv
 Email: lvyunyun_sci@foxmail.com
-Version: 1.1.0
+Version: 1.0.0
 License: MIT
 """
 

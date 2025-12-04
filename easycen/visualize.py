@@ -5,7 +5,7 @@ Centromere visualization with boundary optimization and statistical analysis
 
 Author: Yunyun Lv
 Email: lvyunyun_sci@foxmail.com
-Version: 2.1.0
+Version: 1.0.0
 License: MIT
 """
 

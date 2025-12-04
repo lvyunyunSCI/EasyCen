@@ -8,9 +8,6 @@ Email: lvyunyun_sci@foxmail.com
 Version: 1.0.0
 License: MIT
 
-Note: Centromere detection now uses weighted combination of kmer density (30%) 
-and feature_percent (70%), where higher kmer density and lower feature_percent 
-indicate centromere regions. These weights can be adjusted in future versions.
 """
 
 import argparse
