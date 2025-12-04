@@ -295,7 +295,7 @@ Boundary Optimization: Composite score plots showing optimization process
 Statistical Summary: Size distributions, positional analysis, and comparisons
 
 # Examples
-Arabidopsis thaliana (Thale cress)
+Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
 ```bash
 genome=chrs.fa
 abb=ninanjie_t2t
@@ -319,7 +319,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-Mouse
+The mouse T2T genome can be downloaded from https://github.com/yulab-ql/mhaESC_genome/releases; however, we excluded the Y chromosome due to its extensive highly repetitive regions.
 ```bash
 genome=mhaESC.t2t.fa
 abb=mouse_mhaESC
@@ -344,6 +344,7 @@ elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 --select_chroms CENChr12,CENChr15,CENChr16,CENChr19
 ```
+
 
 
 
