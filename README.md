@@ -11,7 +11,7 @@
 EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer analysis with specialized focus on centromere detection and visualization. The toolkit integrates multiple analysis modules including k-mer profiling, centromere boundary optimization, Hi-C contact map visualization, and sequence extraction.
 
 ## workflow
-
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/workflow.png" alt="Centromere plot" width="700" height="1000"/>
 
 
 ### Key Features
@@ -346,6 +346,7 @@ easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --
 ```
 # Result
 <img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results plot" width="1000" height="1200"/>
+
 
 
 
