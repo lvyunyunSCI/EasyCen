@@ -378,3 +378,4 @@ easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --
 
 
 
+
