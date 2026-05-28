@@ -33,7 +33,8 @@ EasyCen is a command-line toolkit for identifying centromeric regions from T2T g
 conda ceate -n EasyCen_env install
 conda activate EasyCen_env
 conda install python=3.12 pigz cooler samtools numpy, scipy, matplotlib, \
-              biopython, pandas, seaborn, samtools numba tqdm  multiprocess, psutil
+              biopython, pandas, seaborn, samtools numba tqdm  multiprocess, \
+              psutil, trackc
 ```
 ### Quick Installation
 ```bash
