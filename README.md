@@ -56,8 +56,8 @@ easycen visualize --results-dir results --output-dir vis2 \
 # 4. Extract centromere sequences
 easycen extract -i genome.fa -b vis2/optimized_centromeres.bed -o centromeres.fa
 ```
-###Command overview
-###Command	Purpose
+### Command overview
+### Command	Purpose
 analyze：K-mer profiling and initial centromere detection
 visualize: Genome overview, chromosome plots, boundary optimisation
 extract: Extract sequences from BED regions
@@ -65,11 +65,11 @@ kmer-pairs: Generate k-mer position pair table
 hic:Plot triangular Hi-C contact maps
 Run easycen <command> --help for detailed options.
 
-###Parameter recommendations for different genomes
+### Parameter recommendations for different genomes
 The behaviour of analyze and visualize can be tuned depending on genome size and repetitiveness.
 Below are the key parameters and suggested values based on test species.
 
-###analyze-centromere scanning
+### analyze-centromere scanning
 Genome type	--min-count	--clustering-threshold	--step	Notes
 Small / compact (e.g. Arabidopsis)	20	0.5 (default)	10000	Higher min‑count helps reduce noise
 Medium (rice, green algae)	5	0.6	10000	Lower min‑count to retain rare kmers
@@ -84,7 +84,7 @@ Small/fragmented (rice, fish)	10 000	        10	                       0.05	  
 Tip: Use a smaller --optimization-extension and lower --max-extension-factor for small genomes to avoid merging of adjacent chromosomes.
 
 # Examples
-1.Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
+# 1.Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
 ```bash
 genome=chrs.fa
 abb=Arabidopsis_thaliana
@@ -108,7 +108,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time}"
 ```
-2.The mouse T2T genome can be downloaded from https://github.com/yulab-ql/mhaESC_genome/releases; 
+# 2.The mouse T2T genome can be downloaded from https://github.com/yulab-ql/mhaESC_genome/releases; 
 ```bash
 genome=mhaESC.t2t.fa
 abb=mouse
@@ -132,10 +132,10 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time}"
 ```
-# Result
+# Results of Thale cressand and mouse
 <img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results of Thale cressand and mouse" width="1000" height="1200"/>
 
-3.rice
+# 3.rice
 ```bash
 genome=NIP-T2T.fa
 abb=rice
@@ -159,7 +159,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-4.maize
+# 4.maize
 ```bash
 genome=maize.chrs.fa
 abb=maize
@@ -183,7 +183,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-5.large yellow croaker
+# 5.large yellow croaker
 ```bash
 genome=dahuangyuT2T.chrs.fa
 abb=large_yellow_croaker
@@ -207,7 +207,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-6.sandalwood
+# 6.sandalwood
 ```bash
 genome=Sal_t2t.fa
 abb=sandalwood
@@ -231,7 +231,7 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-7.green_algae
+# 7.green_algae
 ```bash
 genome=GWHBKBA00000000.genome.fasta
 abb=green_algae
@@ -257,10 +257,10 @@ echo "running time: ${elapsed_time} "
 ```
 
 
-###Output structure
+### Output structure
 After analyze and visualize, the results directory contains:
 
-text
+```text
 EasyCENcore_<name>_res/
 ├── kmer_table.tsv                  # all selected k‑mers and their metrics
 ├── centromere_summary.txt          # primary and candidate regions
@@ -278,8 +278,9 @@ EasyCENvis2_<name>_res/
 ├── centromere_statistics.csv
 └── chromosome_details/
     └── <chrom>_detailed.pdf
+```
 
-###Common issues
+### Common issues
 
 Q: Very large genomes run out of memory.
 A: Reduce the number of parallel processes (-p), increase --min-count, or use --low-memory in kmer-pairs.
@@ -291,15 +292,15 @@ Also check that --exclude-telomere matches your organism.
 Q: The boundary optimisation extends too far.
 A: Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance.
 
-###Citation
+### Citation
 If you use EasyCen in your research, please cite:
 
 Yunyun Lv. EasyCen: a toolkit for genome‑wide centromere identification. (in preparation)
 
-###License
+### License
 This project is licensed under the MIT License – see the LICENSE file for details.
 
-###Contact
+### Contact
 For questions, suggestions or collaboration, please contact Yunyun Lv at lvyunyun_sci@foxmail.com.
 
 
