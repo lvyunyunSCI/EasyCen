@@ -30,11 +30,19 @@ It combines k-mer frequency, periodicity, clustering and feature composition to 
 
 - Python 3.12
 ### conda env 
-- conda ceate -n EasyCen_env install python=3.12 pigz cooler samtools numpy, scipy, matplotlib, biopython, pandas, seaborn, samtools numba tqdm  multiprocess, psutil
+```bash
+conda ceate -n EasyCen_env install
+conda activate EasyCen_env
+conda install python=3.12 pigz cooler samtools numpy, scipy, matplotlib, \
+              biopython, pandas, seaborn, samtools numba tqdm  multiprocess, psutil
+```bash
 ### Quick Installation
-- git clone https://github.com/lvyunyunSCI/EasyCen.git
-- source activate EasyCen_env
-- pip install -e .
+```bash
+git clone https://github.com/lvyunyunSCI/EasyCen.git
+cd EasyCen
+conda activate EasyCen_env
+pip install -e .
+```
 - 16GB+ RAM (100GB+ recommended for large genomes)
 - Multi-core processor for parallel processing
 
