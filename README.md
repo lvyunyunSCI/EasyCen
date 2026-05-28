@@ -35,7 +35,7 @@ conda ceate -n EasyCen_env install
 conda activate EasyCen_env
 conda install python=3.12 pigz cooler samtools numpy, scipy, matplotlib, \
               biopython, pandas, seaborn, samtools numba tqdm  multiprocess, psutil
-```bash
+```
 ### Quick Installation
 ```bash
 git clone https://github.com/lvyunyunSCI/EasyCen.git
