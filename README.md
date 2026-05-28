@@ -171,6 +171,9 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
+# Results of rice
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/figureS2_rice.png" alt="Results of rice" width="1000" height="1200"/>
+
 # 4.maize
 ```bash
 genome=maize.chrs.fa
@@ -195,6 +198,9 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
+# Results of maize
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/figureS1_maize.png" alt="Results of maize" width="1000" height="1200"/>
+
 # 5.large yellow croaker
 ```bash
 genome=dahuangyuT2T.chrs.fa
@@ -219,6 +225,9 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
+# Results of large yellow croaker
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/figureS3_dahuangyu.png" alt="Results of large yellow croaker" width="1000" height="1200"/>
+
 # 6.sandalwood
 ```bash
 genome=Sal_t2t.fa
@@ -243,7 +252,10 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-# 7.green_algae
+# Results of sandalwood
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/figureS4_sandalwood.png" alt="Results of sandalwood" width="1000" height="1200"/>
+
+# 7.green algae
 ```bash
 genome=GWHBKBA00000000.genome.fasta
 abb=green_algae
@@ -267,7 +279,8 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-
+# Results of green algae
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/figureS5_green_algae.png" alt="Results of green algae" width="1000" height="1200"/>
 
 ### Output structure
 After analyze and visualize, the results directory contains:
