@@ -298,7 +298,7 @@ EasyCENcore_<name>_res/
 EasyCENvis2_<name>_res/
 ├── analysis_centromeres.bed        # primary calls from the first visualisation
 ├── optimized_centromeres.bed       # final refined regions
-├── genome_centromere_overview.pdf  # results of identified primary centromere regions
+├── genome_centromere_overview.pdf  # results of identified primary centromere regions (the most important)
 ├── centromere_statistics.pdf
 ├── centromere_statistics.csv
 └── chromosome_details/
