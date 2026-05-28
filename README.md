@@ -12,7 +12,7 @@ EasyCen is a command-line toolkit for identifying centromeric regions from T2T g
 It combines k-mer frequency, periodicity, clustering and feature composition to locate centromeres, refine their boundaries, extract sequences and generate co-occourence matrix plot.
 
 ## workflow
-<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/workflow.png" alt="Centromere plot" width="700" height="1000"/>
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure1.png" alt="workflow plot" width="700" height="1000"/>
 
 
 ### Key Features
@@ -145,7 +145,7 @@ elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time}"
 ```
 # Results of Thale cressand and mouse
-<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results of Thale cressand and mouse" width="1000" height="1200"/>
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/fiugre2.png" alt="Results of Thale cressand and mouse" width="1000" height="1200"/>
 
 # 3.rice
 ```bash
