@@ -70,18 +70,22 @@ The behaviour of analyze and visualize can be tuned depending on genome size and
 Below are the key parameters and suggested values based on test species.
 
 ### analyze-centromere scanning
+```text
 Genome type	--min-count	--clustering-threshold	--step	Notes
 Small / compact (e.g. Arabidopsis)	20	0.5 (default)	10000	Higher min‑count helps reduce noise
 Medium (rice, green algae)	5	0.6	10000	Lower min‑count to retain rare kmers
 Large complex (maize, sandalwood)	5	0.6	10000 (default)	Clustering threshold raised to 0.6
 Vertebrate (mouse, fish)	20 (mouse) / 5 (fish)	0.5	10000	Use --exclude-telomere animal
-visualize – boundary refinement
+```
+### visualize – boundary refinement
+```text
 Genome size	  --optimization-extension	--max-extension-factor	--distribution-threshold	--mean-tolerance
 < 200 Mb	   1 000 000 (1 Mb)	                40	                      0.001	                   0.001
 200–500 Mb	   5 000 000 (5 Mb)	                40	                      0.001                    0.001
 > 500 Mb	   10 000 000 (10 Mb)	            40	                      0.001	                   0.001
 Small/fragmented (rice, fish)	10 000	        10	                       0.05	                   0.01
 Tip: Use a smaller --optimization-extension and lower --max-extension-factor for small genomes to avoid merging of adjacent chromosomes.
+```
 
 # Examples
 # 1.Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
