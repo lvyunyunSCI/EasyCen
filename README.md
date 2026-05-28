@@ -8,8 +8,7 @@
 
 ## Overview
 
-EasyCen is a command-line toolkit for identifying centromeric regions from T2T genome assemblies.
-It combines k-mer frequency, periodicity, clustering and feature composition to locate centromeres, refine their boundaries, extract sequences and generate co-occourence matrix plot.
+EasyCen is a command-line toolkit for identifying centromeric regions from T2T genome assemblies. It integrates k-mer frequency, periodicity, clustering, and sequence feature composition to locate centromeres, refine their boundaries, extract centromeric sequences, and generate co-occurrence matrix plots.
 
 ## workflow
 <img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure1.png" alt="workflow plot" width="1000" height="1200"/>
