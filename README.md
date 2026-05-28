@@ -1,6 +1,6 @@
 # EasyCen
 
-**Fast Genome-Wide K-mer-Based Centromere Detection and Visualization Tool**
+**Fast Genome-wide centromere detection via k-mer analysis**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -8,7 +8,8 @@
 
 ## Overview
 
-EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer analysis with specialized focus on centromere detection and visualization. The toolkit integrates multiple analysis modules including k-mer profiling, centromere boundary optimization, Hi-C contact map visualization, and sequence extraction.
+EasyCen is a command-line toolkit for identifying centromeric regions from T2T genome assemblies.
+It combines k-mer frequency, periodicity, clustering and feature composition to locate centromeres, refine their boundaries, extract sequences and generate co-occourence matrix plot.
 
 ## workflow
 <img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/workflow.png" alt="Centromere plot" width="700" height="1000"/>
@@ -16,298 +17,137 @@ EasyCen is a comprehensive bioinformatics toolkit designed for genome-wide k-mer
 
 ### Key Features
 
-- **Comprehensive Analysis**: K-mer profiling, GC content analysis, CpG density, and feature percentage calculations
-- **Advanced Centromere Detection**: Multi-threshold boundary optimization with statistical validation
-- **High-Quality Visualization**: Publication-ready genome overviews and detailed chromosome plots
-- **Hi-C Integration**: Triangular contact map visualization from .mcool files
-- **Performance Optimized**: Parallel processing, memory-efficient algorithms, and Numba acceleration
-- **User-Friendly**: Command-line interface with sensible defaults and comprehensive documentation
-
+- **Centromere scanning**: multi-threshold detection with adaptive boundary expansion
+- **K-mer selection**: weighted by periodicity, chromosome breadth and clustering; fallback mode for unconventional genomes
+- **Telomere filtering**: removes telomere-like repeats (built-in database for plants, vertebrates)
+- **Optimisation & visualisation**: dynamic extension to refine boundaries; publication-quality chromosome plots and statistics
+- **Sequence extraction**: extract centromere regions in FASTA format
+- **Position pair generation**: random sampling of intra-chromosomal k-mer pairs (for downstream Hi‑C simulation or structural analysis)
+- **Triangular plot**: draw co-occourence matrix from .mcool files (requires trackc)
 ## Installation
 
 ### Prerequisites
 
 - Python 3.12
 ### conda env 
-- conda ceate -n EasyCen_env install python=3.12 pigz
+- conda ceate -n EasyCen_env install python=3.12 pigz cooler samtools numpy, scipy, matplotlib, biopython, pandas, seaborn, samtools numba tqdm  multiprocess, psutil
+### Quick Installation
 - git clone https://github.com/lvyunyunSCI/EasyCen.git
 - source activate EasyCen_env
 - pip install -e .
 - 16GB+ RAM (100GB+ recommended for large genomes)
 - Multi-core processor for parallel processing
 
-### Quick Installation
+### Quick start
+A minimal analysis of a plant genome:
 
 ```bash
-Development Installation
-bash
-git clone https://github.com/lvyunyunSCI/EasyCen.git
-cd EasyCen
-pip install -e .
+# 1. Detect centromeres
+easycen analyze --fasta genome.fa -p 8 --output results --exclude-telomere plant --adaptive-expand
+
+# 2. First visualisation (uses internal primary regions)
+easycen visualize --results-dir results --output-dir vis1
+
+# 3. Optimise boundaries using the initial calls
+easycen visualize --results-dir results --output-dir vis2 \
+    --known-centromeres vis1/analysis_centromeres.bed \
+    --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000
+
+# 4. Extract centromere sequences
+easycen extract -i genome.fa -b vis2/optimized_centromeres.bed -o centromeres.fa
 ```
-### Dependencies
-EasyCen automatically installs the following dependencies:
-
-Core: numpy, scipy, matplotlib, biopython, pandas, seaborn, samtools, pigz
-
-Performance: numba (optional, for acceleration), tqdm
-
-Visualization: trackc, cooler
-
-Utilities: multiprocess, psutil
-
-### Quick Start
-### Basic Centromere Analysis
-```bash
-# Analyze centromeres with default parameters
-easycen analyze --fasta genome.fa --output results
-```
-
-# With custom k-mer length and window size
-easycen analyze --fasta genome.fa -k 21 --window 500000 --output custom_results
-### Visualization
-```bash
-# Visualize analysis results
-easycen visualize --results-dir results
-
-# With known centromere annotations for boundary optimization
-easycen visualize --results-dir results --known-centromeres centromeres.bed
-```
-### Repeat kmers transform pairs and visualized as Hi-C Contact Maps
-```bash
-easycen kmer-pairs --kmer-library ./results/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
-samtools faidx ${abb}.cen.fa
-cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
-cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
-cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
-# Plot triangular Hi-C maps
-easycen hic --mcool hic_data.mcool --resolution 10000 --regions "chr1:0-1000000" --outdir hic_plots
-
-# From BED file with multiple regions
-easycen hic --mcool hic_data.mcool --resolution 10000 --regions regions.bed --outdir hic_plots
-### Module Documentation
-### 1. Core Analysis (analyze)
-The core analysis module performs genome-wide k-mer profiling and centromere detection.
-
-Key Parameters
---fasta: Input genome FASTA file (required)
-
--k/--kmer: k-mer length (default: 17)
-
---window: Window size for genomic scanning (default: 100000)
-
---output: Output directory (default: "easycen_results")
-
---processes: Number of parallel processes (default: CPU count - 1)
-```
-
-Advanced Options
-```bash
-# Comprehensive analysis with filtering
-easycen analyze --fasta genome.fa \
-    -k 19 \
-    --window 50000 \
-    --min-count 5 \
-    --max-count 100000 \
-    --min-entropy 1.5 \
-    --exclude-telomere human \
-    --output detailed_results
-Output Files
-kmer_table.tsv: Filtered k-mer statistics
-
-*_kmer.bedgraph: K-mer density tracks per chromosome
-
-*_GC.bedgraph: GC content tracks
-
-*_CpG.bedgraph: CpG density tracks
-
-*_feature_percent.bedgraph: Feature percentage tracks
-
-centromere_summary.txt: Detailed centromere analysis report
-```
-
-### 2. Visualization (visualize)
-The visualization module creates publication-quality plots and performs boundary optimization.
-
-Key Parameters
---results-dir: Analysis results directory (required)
-
---known-centromeres: BED file with known centromere regions
-
---output-dir: Output directory for visualization
-
---kmer-weight: Weight for k-mer density in optimization (default: 0.6)
-
---feature-weight: Weight for feature percentage in optimization (default: 0.4)
-
-Examples
-```bash
-# Basic visualization
-easycen visualize --results-dir analysis_results
-
-# With boundary optimization
-easycen visualize --results-dir analysis_results \
-    --known-centromeres known_cens.bed \
-    --kmer-weight 0.7 \
-    --feature-weight 0.3
-
-# Comparison with published centromeres
-easycen visualize --results-dir analysis_results \
-    --known-centromeres known_cens.bed \
-    --compare published_cens.bed
-Output Files
-genome_centromere_overview.pdf: Genome-wide centromere distribution
-
-chromosome_details/: Individual chromosome plots
-
-centromere_statistics.pdf: Statistical summary
-
-centromere_statistics.csv: Statistical data
-
-optimized_centromeres_*.bed: Optimized boundary coordinates
-```
-
-### 3. Hi-C Plotting (hic)
-Visualize triangular Hi-C contact maps from .mcool files.
-
-Key Parameters
---mcool: Input .mcool file (required)
-
---resolution: Hi-C resolution (required)
-
---regions: Genomic regions to plot (string or BED file)
-
---outdir: Output directory (required)
-
---single: Generate separate plots for each region
-
-Examples
-```bash
-# Single region plot
-easycen hic --mcool hic.mcool --resolution 10000 \
-    --regions "chr1:1000000-5000000" --outdir hic_out
-
-# Multiple regions from BED file
-easycen hic --mcool hic.mcool --resolution 25000 \
-    --regions regions.bed --outdir hic_out --single
-
-# Custom visualization parameters
-easycen hic --mcool hic.mcool --resolution 10000 \
-    --regions "chr1:0-10000000" --outdir hic_out \
-    --cmap coolwarm --vmin 0 --vmax 50 \
-    --fig_width 8 --fig_height 6
-4. K-mer Pairs (kmer-pairs)
-Generate random k-mer position pairs for spatial analysis.
-```
-
-Key Parameters
---kmer-library: K-mer library file (required)
-
---fasta: Genome FASTA file (required)
-
---output: Output file (default: "kmer_pairs.tsv.gz")
-
---sample: Samples per k-mer (default: 10)
-
---threads: Number of worker threads (default: 4)
-
-Example
-```bash
-easycen kmer-pairs --kmer-library kmers.txt \
-    --fasta genome.fa \
-    --sample 20 \
-    --max-pairs-per-kmer 5000 \
-    --output kmer_pairs.tsv.gz
-```
-5. Sequence Extraction (extract)
-Extract genomic sequences from BED file regions.
-
-Key Parameters
--i/--input: Input FASTA file (required)
-
--b/--bed: Input BED file (required)
-
--o/--output: Output FASTA file (stdout if not specified)
-
--w/--width: Sequence line width (default: 120)
-
--c/--case: Output case: original, upper, or lower
-
-Examples
-```bash
-# Basic extraction
-easycen extract -i genome.fa -b regions.bed -o sequences.fa
-
-# With formatting options
-easycen extract -i genome.fa -b regions.bed \
-    -o sequences.fa -w 80 -c upper
-
-# Pipe to other tools
-easycen extract -i genome.fa -b regions.bed | head -n 100
-Advanced Usage
-Performance Optimization
-bash
-# Use all available cores
-easycen analyze --fasta large_genome.fa --processes $(nproc)
-
-# Low memory mode for large genomes
-easycen kmer-pairs --kmer-library large_kmers.txt \
-    --fasta large_genome.fa --low-memory
-
-# Enable Numba acceleration
-easycen analyze --fasta genome.fa --numba
-Batch Processing
-bash
-# Process multiple genomes
-for genome in genomes/*.fa; do
-    base=$(basename $genome .fa)
-    easycen analyze --fasta $genome --output results_$base
-done
-```
-Integration with Other Tools
-```bash
-# Extract centromere sequences for further analysis
-easycen extract -i genome.fa -b results/analysis_centromeres.bed -o centromere_sequences.fa
-
-# Generate k-mer pairs for spatial analysis
-easycen kmer-pairs --kmer-library significant_kmers.txt \
-    --fasta genome.fa --output spatial_pairs.tsv.gz
-```
-Output Interpretation
-Centromere Summary
-The centromere summary provides:
-
-Primary centromere coordinates and sizes
-
-Candidate regions with confidence scores
-
-Centromere type classification (metacentric, telocentric, etc.)
-
-Statistical validation metrics
-
-Visualization Outputs
-Genome Overview: Chromosome-scale centromere distribution
-
-Chromosome Details: Multi-track visualization with k-mer density, GC content, etc.
-
-Boundary Optimization: Composite score plots showing optimization process
-
-Statistical Summary: Size distributions, positional analysis, and comparisons
+###Command overview
+###Command	Purpose
+analyze：K-mer profiling and initial centromere detection
+visualize: Genome overview, chromosome plots, boundary optimisation
+extract: Extract sequences from BED regions
+kmer-pairs: Generate k-mer position pair table
+hic:Plot triangular Hi-C contact maps
+Run easycen <command> --help for detailed options.
+
+###Parameter recommendations for different genomes
+The behaviour of analyze and visualize can be tuned depending on genome size and repetitiveness.
+Below are the key parameters and suggested values based on test species.
+
+###analyze-centromere scanning
+Genome type	--min-count	--clustering-threshold	--step	Notes
+Small / compact (e.g. Arabidopsis)	20	0.5 (default)	10000	Higher min‑count helps reduce noise
+Medium (rice, green algae)	5	0.6	10000	Lower min‑count to retain rare kmers
+Large complex (maize, sandalwood)	5	0.6	10000 (default)	Clustering threshold raised to 0.6
+Vertebrate (mouse, fish)	20 (mouse) / 5 (fish)	0.5	10000	Use --exclude-telomere animal
+visualize – boundary refinement
+Genome size	  --optimization-extension	--max-extension-factor	--distribution-threshold	--mean-tolerance
+< 200 Mb	   1 000 000 (1 Mb)	                40	                      0.001	                   0.001
+200–500 Mb	   5 000 000 (5 Mb)	                40	                      0.001                    0.001
+> 500 Mb	   10 000 000 (10 Mb)	            40	                      0.001	                   0.001
+Small/fragmented (rice, fish)	10 000	        10	                       0.05	                   0.01
+Tip: Use a smaller --optimization-extension and lower --max-extension-factor for small genomes to avoid merging of adjacent chromosomes.
 
 # Examples
-Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
+1.Arabidopsis thaliana (Thale cress) downloaded from https://github.com/schatzlab/Col-CEN
 ```bash
 genome=chrs.fa
-abb=ninanjie_t2t
+abb=Arabidopsis_thaliana
 model=plant
 bin=1000
 source activate EasyCen_env
 start_time=$(date +%s)
-easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model
+easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --adaptive-expand  --step 10000
 easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
 easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000 --distribution-threshold 0.001 --mean-tolerance 0.001
 easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
-easycen kmer-pairs --kmer-library ./EasyCENcore_${abb}_res/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 25000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time}"
+```
+2.The mouse T2T genome can be downloaded from https://github.com/yulab-ql/mhaESC_genome/releases; 
+```bash
+genome=mhaESC.t2t.fa
+abb=mouse
+model=animal
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --adaptive-expand
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 10000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 500000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time}"
+```
+# Result
+<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results of Thale cressand and mouse" width="1000" height="1200"/>
+
+3.rice
+```bash
+genome=NIP-T2T.fa
+abb=rice
+model=plant
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 5 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --clustering-threshold 0.6 --adaptive-expand
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 10 --optimization-extension 10000 --distribution-threshold 0.05 --mean-tolerance 0.01
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
 samtools faidx ${abb}.cen.fa
 cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
 cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
@@ -319,35 +159,148 @@ end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
 ```
-The mouse T2T genome can be downloaded from https://github.com/yulab-ql/mhaESC_genome/releases; however, we excluded the Y chromosome due to its extensive highly repetitive regions.
+4.maize
 ```bash
-genome=mhaESC.t2t.fa
-abb=mouse_mhaESC
-model=animal
+genome=maize.chrs.fa
+abb=maize
+model=plant
 bin=1000
 source activate EasyCen_env
 start_time=$(date +%s)
-easycen analyze --fasta $genome -p 20 --min-count 20 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model
+easycen analyze --fasta $genome -p 20 --min-count 5 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --clustering-threshold 0.6 --adaptive-expand
 easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
-easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 10000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 5000000 --distribution-threshold 0.001 --mean-tolerance 0.001
 easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
-easycen kmer-pairs --kmer-library ./EasyCENcore_${abb}_res/kmer_table.tsv --threads 30 --fasta ${abb}.cen.fa --kmer-library-has-header --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
 samtools faidx ${abb}.cen.fa
 cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
 cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
 cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
 cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
-easycen hic --mcool ${abb}.mcool --resolution 500000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
-easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+easycen hic --mcool ${abb}.mcool --resolution 25000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
 end_time=$(date +%s)
 elapsed_time=$((end_time - start_time))
 echo "running time: ${elapsed_time} "
-easycen hic --mcool ${abb}.mcool --resolution 100000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 --select_chroms CENChr12,CENChr15,CENChr16,CENChr19
 ```
-# Result
-<img src="https://github.com/lvyunyunSCI/EasyCen/blob/main/images/Figure_2.png" alt="Results plot" width="1000" height="1200"/>
+5.large yellow croaker
+```bash
+genome=dahuangyuT2T.chrs.fa
+abb=large_yellow_croaker
+model=animal
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 30 --min-count 5 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --adaptive-expand 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 10 --optimization-extension 10000 --distribution-threshold 0.05 --mean-tolerance 0.01
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz 
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 25000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time} "
+```
+6.sandalwood
+```bash
+genome=Sal_t2t.fa
+abb=sandalwood
+model=plant
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 5 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --exclude-telomere $model --step 10000 --adaptive-expand
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000 --distribution-threshold 0.001 --mean-tolerance 0.001
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 25000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time} "
+```
+7.green_algae
+```bash
+genome=GWHBKBA00000000.genome.fasta
+abb=green_algae
+model=plant
+bin=1000
+source activate EasyCen_env
+start_time=$(date +%s)
+easycen analyze --fasta $genome -p 20 --min-count 5 --max-output 10000000 --numba --output EasyCENcore_${abb}_res --window 100000 --step 10000 --exclude-telomere $model --adaptive-expand  --step 10000
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis_${abb}_res 
+easycen visualize --results-dir EasyCENcore_${abb}_res --output-dir EasyCENvis2_${abb}_res --known-centromeres ./EasyCENvis_${abb}_res/analysis_centromeres.bed --target-mean 0.5 --max-extension-factor 10 --optimization-extension 10000 --distribution-threshold 0.05 --mean-tolerance 0.01
+easycen extract -i $genome -b ./EasyCENvis2_${abb}_res/optimized_centromeres.bed -o ${abb}.cen.fa
+easycen kmer-pairs --threads 30 --fasta ${abb}.cen.fa --min-kmer-num 2 --max-pairs-per-kmer 10000 --sample 1000 --threads 20 --output ${abb}.cen.pairs.gz
+samtools faidx ${abb}.cen.fa
+cut -f1,2 ${abb}.cen.fa.fai > ${abb}.cen.size
+cooler cload pairs -c1 2 -p1 3 -c2 6 -p2 7 --zero-based $PWD/${abb}.cen.size:${bin} ${abb}.cen.pairs.gz ${bin}.cool
+cooler zoomify -o ${abb}.mcool -p 30 --balance -r '1000,5000,10000,25000,50000,100000,200000,500000,1000000,2000000,5000000' $bin.cool
+cat ${abb}.cen.size|perl -lane 'print "$F[0]\t0\t$F[1]"' > ${abb}.cen.bed
+easycen hic --mcool ${abb}.mcool --resolution 5000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --auto_size --tick_rotation 45 --tick_fontsize 6 --intervals 2 --no_auto_size --fig_width 8 --fig_height 2.2 # combine pdf
+easycen hic --mcool ${abb}.mcool --resolution 1000 --regions ${abb}.cen.bed --outdir EasyCENplot_${abb}_res --cmap Spectral_r --tick_rotation 45 --tick_fontsize 8 --single --no_auto_size --fig_width 8 --fig_height 2.2 # single cen plot
+end_time=$(date +%s)
+elapsed_time=$((end_time - start_time))
+echo "running time: ${elapsed_time} "
+```
 
 
+###Output structure
+After analyze and visualize, the results directory contains:
+
+text
+EasyCENcore_<name>_res/
+├── kmer_table.tsv                  # all selected k‑mers and their metrics
+├── centromere_summary.txt          # primary and candidate regions
+├── *_kmer_weighted.bedgraph        # weighted k‑mer density track
+├── *_feature_percent.bedgraph      # feature percentage track
+├── *_periodicity.bedgraph          # periodicity track
+├── *_GC.bedgraph                   # GC content track
+└── *_CpG.bedgraph                  # CpG density track
+
+EasyCENvis2_<name>_res/
+├── analysis_centromeres.bed        # primary calls from the first visualisation
+├── optimized_centromeres.bed       # final refined regions
+├── genome_centromere_overview.pdf  # results of identified primary centromere regions
+├── centromere_statistics.pdf
+├── centromere_statistics.csv
+└── chromosome_details/
+    └── <chrom>_detailed.pdf
+
+###Common issues
+
+Q: Very large genomes run out of memory.
+A: Reduce the number of parallel processes (-p), increase --min-count, or use --low-memory in kmer-pairs.
+
+Q: No centromeres detected.
+A: Try relaxing --clustering-threshold, lowering --min-chromosome-fraction, or using --fallback-fraction 0.1.
+Also check that --exclude-telomere matches your organism.
+
+Q: The boundary optimisation extends too far.
+A: Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance.
+
+###Citation
+If you use EasyCen in your research, please cite:
+
+Yunyun Lv. EasyCen: a toolkit for genome‑wide centromere identification. (in preparation)
+
+###License
+This project is licensed under the MIT License – see the LICENSE file for details.
+
+###Contact
+For questions, suggestions or collaboration, please contact Yunyun Lv at lvyunyun_sci@foxmail.com.
 
 
 
