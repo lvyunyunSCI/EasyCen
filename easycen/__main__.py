@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-EasyCen - Main command line interface
+EasyCen v1.0
+Author: Yunyun Lv
+Email: lvyunyun_sci@foxmail.com
 """
 
 import argparse
@@ -30,7 +32,7 @@ def main():
     analyze_parser.add_argument("--output", default="easycen_results", help="Output directory")
     analyze_parser.add_argument("--processes", "-p", type=int, default=None, help="Number of processes (default: CPU count)")
     
-    # Filtering options
+    # Filtering
     analyze_parser.add_argument("--min-count", type=int, default=10, help="Minimum k-mer count")
     analyze_parser.add_argument("--max-count", type=int, default=10000, help="Maximum k-mer count")
     analyze_parser.add_argument("--min-entropy", type=float, default=1.7, help="Minimum Shannon entropy")
@@ -38,12 +40,32 @@ def main():
     analyze_parser.add_argument("--min-interval-mode", type=int, default=0, help="Minimum interval mode")
     analyze_parser.add_argument("--max-interval-mode", type=int, default=0, help="Maximum interval mode (default: 0, unlimited)")
     
+    # K-mer selection
+    analyze_parser.add_argument("--min-chromosome-fraction", type=float, default=0.5,
+                               help="Minimum fraction of chromosomes a k-mer must appear on")
+    analyze_parser.add_argument("--min-chromosomes", type=int, default=None,
+                               help="Exact minimum number of chromosomes (overrides fraction)")
+    analyze_parser.add_argument("--clustering-threshold", type=float, default=0.5,
+                               help="Minimum concentration score (1 - span/chrom_length) for a k-mer")
+    analyze_parser.add_argument("--Periodicity_threshold",type=float, default=0.5,
+                                help="Periodicity threshold for a k-mer (default: 0.5).")
+    
+    # Fallback mode
+    analyze_parser.add_argument("--fallback-fraction", type=float, default=0.05,
+                               help="Fraction of top k-mers to retain in fallback mode")
+    analyze_parser.add_argument("--fallback-weight-periodicity", type=float, default=0.4,
+                               help="Weight for periodicity in fallback composite score")
+    analyze_parser.add_argument("--fallback-weight-clustering", type=float, default=0.4,
+                               help="Weight for clustering in fallback composite score")
+    analyze_parser.add_argument("--fallback-weight-breadth", type=float, default=0.2,
+                               help="Weight for chromosome breadth in fallback composite score")
+    
     # Telomere filtering
     analyze_parser.add_argument("--exclude-telomere", type=str, default="none",
                                help="Exclude telomere-similar kmers. Options: none, organism name, or custom repeats")
     analyze_parser.add_argument("--telomere-similarity", type=float, default=50.0, help="Similarity threshold %%")
     
-    # Centromere detection parameters
+    # Centromere detection
     analyze_parser.add_argument("--min-centromere-size", type=int, default=100000, help="Minimum centromere region size")
     analyze_parser.add_argument("--max-centromere-gap", type=int, default=200000, help="Maximum gap between regions")
     analyze_parser.add_argument("--kmer-density-threshold", type=float, default=0.6, help="K-mer density threshold")
@@ -53,20 +75,28 @@ def main():
     analyze_parser.add_argument("--max-output", type=int, default=1000000, help="Max k-mers per chromosome")
     analyze_parser.add_argument("--sample-seqs", type=int, default=2, help="Sample blocks for interval mode")
     
-    # Advanced options
+    # Advanced
     analyze_parser.add_argument("--numba", action="store_true", help="Force Numba acceleration")
     analyze_parser.add_argument("--custom-kmers", help="Custom kmer list file")
     
+    # Adaptive boundary expansion
+    analyze_parser.add_argument("--adaptive-expand", action="store_true",
+                               help="Use adaptive boundary expansion based on composite score (recommended)")
+    analyze_parser.add_argument("--expand-weights", type=float, nargs=3, default=(0.2, 0.4, 0.4),
+                               metavar=("W_KMER", "W_FEATURE", "W_PERIOD"),
+                               help="Weights for weighted_kmer, feature_percent (inverted), periodicity (default: 0.2 0.4 0.4)")
+    analyze_parser.add_argument("--expand-threshold", type=float, default=0.6,
+                               help="Stop threshold relative to core median score (default: 0.6)")
+    analyze_parser.add_argument("--max-expand-ratio", type=float, default=0.25,
+                               help="Maximum expansion as fraction of chromosome length (default: 0.25)")
+    analyze_parser.add_argument("--expand-smooth", type=int, default=3,
+                               help="Smoothing window for score profile (default: 3, set 1 to disable)")
+    analyze_parser.add_argument("--expand-lag", type=int, default=2,
+                               help="Number of consecutive windows below threshold to stop expansion (default: 2)")
+    
     # visualize command  
     vis_parser = subparsers.add_parser("visualize", 
-        help="""Visualize centromere results and centromere detection optimization
-
-Recommended parameters for different genomes:
-- Mouse (large genome): --target-mean 0.5 --max-extension-factor 40 --optimization-extension 10000000 --distribution-threshold 0.001 --mean-tolerance 0.001
-- Arabidopsis (small genome): --target-mean 0.5 --max-extension-factor 40 --optimization-extension 1000000 --distribution-threshold 0.001 --mean-tolerance 0.001
-
-Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extension (e.g., 1Mb).
-      For large genomes (e.g., Mouse), use larger --optimization-extension (e.g., 10Mb).""",
+        help="Visualize centromere results and optimize centromere detection",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     vis_parser.add_argument("--results-dir", required=True, help="Analysis results directory")
@@ -77,7 +107,7 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
     vis_parser.add_argument("--optimization-extension", type=int, default=100000, 
                           help="Initial extension around known centromere for optimization search in bp")
     
-    # New optimization parameters
+    # Optimization parameters
     vis_parser.add_argument("--smoothing-sigma", type=float, default=2.0,
                           help="Sigma parameter for Gaussian smoothing of composite scores")
     vis_parser.add_argument("--distribution-threshold", type=float, default=0.05,
@@ -91,7 +121,7 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
     vis_parser.add_argument("--min-region-size", type=int, default=50000,
                           help="Minimum size for candidate regions in bp")
     
-    # Dynamic extension parameters
+    # Dynamic extension
     vis_parser.add_argument("--dynamic-extension", action="store_true", default=True,
                           help="Enable dynamic extension to achieve target sampling mean")
     vis_parser.add_argument("--no-dynamic-extension", action="store_false", dest="dynamic_extension",
@@ -144,12 +174,17 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
     
     # kmer-pairs command
     pairs_parser = subparsers.add_parser("kmer-pairs", 
-        help="Generate k-mer position pairs",
+        help="Generate k-mer position pairs (supports auto-extraction from genome)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    pairs_parser.add_argument("--kmer-library", required=True, help="K-mer library file")
+    pairs_parser.add_argument("--kmer-library", default=None,
+                             help="K-mer library file (optional; if not provided, k-mers are extracted from the genome)")
     pairs_parser.add_argument("--fasta", required=True, help="Genome FASTA file")
     pairs_parser.add_argument("--output", "-o", default="kmer_pairs.tsv.gz", help="Output file")
-    pairs_parser.add_argument("--k", type=int, help="k-mer length (optional, auto-detected)")
+    pairs_parser.add_argument("--k", type=int, help="k-mer length (for library; auto-detected if not given)")
+    pairs_parser.add_argument("--kmer-len", type=int, default=19,
+                             help="k-mer length when extracting directly from genome (default: 19)")
+    pairs_parser.add_argument("--min-kmer-num", type=int, default=5,
+                             help="Minimum occurrence count to retain a k-mer (default: 5)")
     pairs_parser.add_argument("--sample", type=int, default=1000, help="samples per k-mer")
     pairs_parser.add_argument("--max-pairs-per-kmer", type=int, default=10000, help="Maximum pairs per k-mer")
     pairs_parser.add_argument("--threads", type=int, default=4, help="number of worker processes for scanning")
@@ -181,6 +216,7 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
                 fasta_file=args.fasta,
                 kmer_length=args.kmer,
                 window_size=args.window,
+                step=args.step,
                 output_dir=args.output,
                 processes=args.processes,
                 min_count=args.min_count,
@@ -196,7 +232,21 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
                 max_output=args.max_output,
                 sample_seqs=args.sample_seqs,
                 custom_kmers=args.custom_kmers,
-                numba_accel=args.numba
+                numba_accel=args.numba,
+                min_chromosome_fraction=args.min_chromosome_fraction,
+                min_chromosomes=args.min_chromosomes,
+                clustering_threshold=args.clustering_threshold,
+                fallback_fraction=args.fallback_fraction,
+                fallback_weight_periodicity=args.fallback_weight_periodicity,
+                fallback_weight_clustering=args.fallback_weight_clustering,
+                fallback_weight_breadth=args.fallback_weight_breadth,
+                Periodicity_threshold=args.Periodicity_threshold,
+                adaptive_expand=args.adaptive_expand,
+                expand_weights=tuple(args.expand_weights),
+                expand_threshold=args.expand_threshold,
+                max_expand_ratio=args.max_expand_ratio,
+                expand_smooth=args.expand_smooth,
+                expand_lag=args.expand_lag
             )
         elif args.command == "visualize":
             visualize_results(
@@ -225,7 +275,6 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
                 extension_increment=args.extension_increment
             )
         elif args.command == "hic":
-            # 处理 map_type 缩写
             map_type = args.map_type
             if map_type in ['squ', 'que']:
                 map_type = 'square'
@@ -260,13 +309,15 @@ Note: For small genomes (e.g., Arabidopsis), use smaller --optimization-extensio
                 kmer_library=args.kmer_library,
                 fasta_file=args.fasta,
                 output_file=args.output,
-                kmer_length=args.k,
+                kmer_length=args.k if args.kmer_library else None,
                 samples_per_kmer=args.sample,
                 max_pairs_per_kmer=args.max_pairs_per_kmer,
                 threads=args.threads,
                 low_memory=args.low_memory,
                 forward_only=args.forward_only,
-                kmer_library_has_header=args.kmer_library_has_header
+                kmer_library_has_header=args.kmer_library_has_header,
+                kmer_len=args.kmer_len,
+                min_kmer_num=args.min_kmer_num
             )
         elif args.command == "extract":
             extract_sequences(
