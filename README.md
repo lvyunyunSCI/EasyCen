@@ -313,7 +313,7 @@ Reduce the number of parallel processes (-p), increase --min-count, or use --low
 ```
 
 Q: No centromeres detected.
-``text
+```text
 Try relaxing --clustering-threshold, lowering --min-chromosome-fraction, or using --fallback-fraction 0.1.
 Also check that --exclude-telomere matches your organism.
 ```
