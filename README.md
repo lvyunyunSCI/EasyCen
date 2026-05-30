@@ -308,19 +308,25 @@ EasyCENvis2_<name>_res/
 ### Common issues
 
 Q: Very large genomes run out of memory.
-A: Reduce the number of parallel processes (-p), increase --min-count, or use --low-memory in kmer-pairs.
+```text
+Reduce the number of parallel processes (-p), increase --min-count, or use --low-memory in kmer-pairs.
+```
 
 Q: No centromeres detected.
-A: Try relaxing --clustering-threshold, lowering --min-chromosome-fraction, or using --fallback-fraction 0.1.
+``text
+Try relaxing --clustering-threshold, lowering --min-chromosome-fraction, or using --fallback-fraction 0.1.
 Also check that --exclude-telomere matches your organism.
+```
 
 Q: The boundary optimisation extends too far.
-A: Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance.
+```text
+Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance.
+```
 
 ### Citation
 If you use EasyCen in your research, please cite:
 
-Yunyun Lv. EasyCen: a toolkit for genome‑wide centromere identification. (in preparation)
+Yunyun Lv. EasyCen: a lightweight framework for centromere localization and repeat-organization profiling in telomere-to-telomere genomes. (in preparation)
 
 ### License
 This project is licensed under the MIT License – see the LICENSE file for details.
