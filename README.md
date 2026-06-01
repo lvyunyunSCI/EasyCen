@@ -326,7 +326,7 @@ Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance
 ### Citation
 If you use EasyCen in your research, please cite:
 
-Yunyun Lv. EasyCen: a lightweight framework for centromere localization and repeat-organization profiling in telomere-to-telomere genomes. (in preparation)
+Yunyun Lv. EasyCen: a lightweight framework for centromere localization and repeat-organization profiling in telomere-to-telomere genomes. (In Review)
 
 ### License
 This project is licensed under the MIT License – see the LICENSE file for details.
