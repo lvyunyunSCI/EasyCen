@@ -326,13 +326,13 @@ Decrease --max-extension-factor and adjust --expand-threshold / --mean-tolerance
 ### Citation
 If you use EasyCen in your research, please cite:
 
-Yunyun Lv. EasyCen: a lightweight framework for centromere localization and repeat-organization profiling in telomere-to-telomere genomes. (In Review)
+Lv, Y., Y. Li, J. Li, and X. Mu. 2026. “EasyCen: A Lightweight Framework for Centromere Localisation and Repeat-Organisation Profiling in Telomere-to-Telomere Genomes.” Molecular Ecology Resources26, no. 5: e70176. https://doi.org/10.1111/1755-0998.70176
 
 ### License
 This project is licensed under the MIT License – see the LICENSE file for details.
 
 ### Contact
-For questions, suggestions or collaboration, please contact Yunyun Lv at lvyunyun_sci@foxmail.com.
+For questions, suggestions, collaboration, or discussions on T2T genome assembly and centromere research, please contact Yunyun Lv via email (lvyunyun_sci@foxmail.com) or via QQ (46604147).
 
 
 
